@@ -133,13 +133,21 @@ Nothing is written for a book until its Calibre id is in the write allowlist;
 until then the sync only reports. Manage it with `concordance-allow`:
 
 ```bash
-concordance-allow add 561       # adds "561  # Misery" to ./allowlist
+concordance-allow add 561 581   # one or more Calibre ids
 concordance-allow remove 561
 ```
 
-The allowlist is a plain file, `allowlist` in the repository root (git-ignored),
-with one id per line. Ids in `CONCORDANCE_WRITE_ALLOWLIST` count too. Enable
-books one at a time:
+Without `pip install`, run `python3 -m concordance.allowlist` from the
+repository instead. Each change prints the resulting list.
+
+The allowlist is a plain, git-ignored file, `allowlist` in the repository root
+(`CONCORDANCE_WRITE_ALLOWLIST_FILE` moves it), with one id per line. With
+`.env` loaded, `add` looks the book up in Calibre and writes its title as a
+comment (`561  # Misery`), and warns if no book has that id. Ids in the
+`CONCORDANCE_WRITE_ALLOWLIST` variable are allowed as well, and `remove` warns
+when an id is still allowed there.
+
+Enable books one at a time:
 
 1. Pick a test book you aren't reading. Set progress on one side, allowlist it,
    run `concordance --book-id <id> --apply`, and check where you land on the
@@ -148,9 +156,9 @@ books one at a time:
    the position.
 3. Add more.
 
-Values in `.env` can't contain spaces. If you set `CONCORDANCE_WRITE_ALLOWLIST`
-there, write `12,34`, not `12, 34`: with a space, the shell runs `34` as a
-command and the list ends up empty.
+Values in `.env` can't contain unquoted spaces, because the file is loaded by the
+shell. `CONCORDANCE_WRITE_ALLOWLIST=12, 34` makes the shell run `34` as a
+command and leaves the variable empty; write `12,34`.
 
 **What you'll see in KOReader.** When you open a book, the CWA plugin fetches the
 latest position and asks something like *"Sync to latest location 36% from
@@ -184,7 +192,7 @@ day, which means the two sides disagree about which is further, and repeated
 | `CALIBRE_ROOT` | — | Calibre library directory |
 | `CALIBRE_DB` | `$CALIBRE_ROOT/metadata.db` | Calibre database |
 | `ABS_AUDIO_ROOT_MAP` | — | `<path in ABS>=<path on host>`; required for alignment |
-| `CONCORDANCE_WRITE_ALLOWLIST_FILE` | `./allowlist` | Allowlist file edited by `concordance-allow` |
+| `CONCORDANCE_WRITE_ALLOWLIST_FILE` | `allowlist` in the repository root | Allowlist file edited by `concordance-allow` |
 | `CONCORDANCE_WRITE_ALLOWLIST` | empty | More Calibre ids that may be written, comma-separated |
 | `CONCORDANCE_WRITE_TIERS` | `aligned,interpolated,finished` | Tiers that may be written |
 | `CONCORDANCE_REWIND_SECONDS` | `150` | How early audiobook writes land |
