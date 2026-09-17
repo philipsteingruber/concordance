@@ -347,8 +347,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.planned_only or not args.run:
         minutes = sum(job.end - job.start for job in jobs) / 60
+        finish = datetime.now() + timedelta(seconds=minutes * 60 * ESTIMATED_PACE)
+        limit = f"deadline {deadline:%H:%M}" if deadline else "no deadline"
         print(f"{len(jobs)} group(s) to align, {minutes:.0f} audio minutes "
-              f"(~{minutes * ESTIMATED_PACE / 60:.1f} h at the measured pace)")
+              f"(~{minutes * ESTIMATED_PACE / 60:.1f} h at the measured pace, done by about "
+              f"{finish:%H:%M} if started now); {limit}")
 
     for job in jobs:
         base = {"book": job.title, "group": job.key.filename(), "reason": job.reason,
