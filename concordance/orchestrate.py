@@ -212,25 +212,35 @@ def alignment_status(code: int, stats: dict, min_score: float) -> str:
     return "aligned"
 
 
-def docker_command(job: Job, cfg: Config, cache_root: Path, manifest_name: str) -> list[str]:
-    """The `docker run` for one job. Audio is mounted at the path ABS reports, so the
-    manifest's paths work unchanged inside the container."""
+def docker_options(cfg: Config, cache_root: Path) -> list[str]:
+    """`docker run` options shared by every job in the aligner image: user, limits, mounts.
+
+    Audio is mounted at the path ABS reports, so manifest paths work unchanged inside.
+    """
     if cfg.abs_audio_root is None:
         raise ConfigError("ABS_AUDIO_ROOT_MAP is required for alignment (e.g. /audiobooks=/srv/audiobooks)")
     abs_root, host_root = cfg.abs_audio_root
-    book_file = LIBRARY_CONTAINER + job.book_file[len(cfg.calibre_root):]
     passthrough = [arg for name in WORKER_SETTINGS if os.environ.get(name, "").strip()
                    for arg in ("-e", f"{name}={os.environ[name].strip()}")]
-    return ["docker", "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}", "-e", "HOME=/cache",
+    return ["run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}", "-e", "HOME=/cache",
             *passthrough,
             "--memory", cfg.aligner_memory, "--memory-swap", cfg.aligner_memory,
             "--cpu-shares", str(cfg.aligner_cpu_shares),
             "-v", f"{REPO / 'concordance'}:/app/concordance:ro",
             "-v", f"{cache_root}:/cache",
             "-v", f"{host_root}:{abs_root}:ro",
-            "-v", f"{cfg.calibre_root}:{LIBRARY_CONTAINER}:ro",
-            cfg.aligner_image,
-            "--book-file", book_file, "--fmt", job.key.fmt,
+            "-v", f"{cfg.calibre_root}:{LIBRARY_CONTAINER}:ro"]
+
+
+def container_path(cfg: Config, host_path: str) -> str:
+    """A path under the Calibre library as the aligner container sees it."""
+    return LIBRARY_CONTAINER + host_path[len(cfg.calibre_root):]
+
+
+def docker_command(job: Job, cfg: Config, cache_root: Path, manifest_name: str) -> list[str]:
+    """The `docker run` for one alignment job."""
+    return ["docker", *docker_options(cfg, cache_root), cfg.aligner_image,
+            "--book-file", container_path(cfg, job.book_file), "--fmt", job.key.fmt,
             "--spines", f"{job.key.first_spine}-{job.key.last_spine}",
             "--audio-manifest", f"/cache/work/manifests/{manifest_name}",
             "--start", f"{job.start:.3f}", "--end", f"{job.end:.3f}",

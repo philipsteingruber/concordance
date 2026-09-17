@@ -166,6 +166,40 @@ device 'concordance'?"*. The percentage is 2 points below the real one on
 purpose, so your Kobo's own saves aren't rejected as being behind. Accepting
 jumps to the exact spot.
 
+## Fixing chapter marks in Audiobookshelf
+
+Some audiobook releases mark arbitrary slices of the recording as chapters: ten
+70-minute "Chapter N" tracks for a book that has 120 chapters. That makes the
+player's chapter list useless. `concordance-chapters` rebuilds those slices from
+the ebook's real chapters, one book at a time:
+
+```bash
+concordance-chapters check 561      # instant: ABS chapters vs real chapters, per ABS chapter
+concordance-chapters propose 561    # locate each real chapter in the audio; writes nothing
+concordance-chapters apply 561      # back up ABS's chapter list, then write the proposal
+concordance-chapters restore 561    # put the latest backup back
+```
+
+A book is only touched when it has at least 1.5 times as many real chapters as
+ABS chapters, and only the ABS chapters that contain two or more real chapters
+are rebuilt, together with any short run of slices between them.
+
+- **Finding chapters in the ebook:** table-of-contents entries that point inside
+  files, numbered headings that count upwards (it tells a book's chapters apart
+  from, say, a novel-within-the-novel's "CHAPTER 3"), or one chapter per file.
+  When numbering restarts in each part, titles become "Part Two, Chapter 4".
+- **Finding them in the audio:** times come from the alignment cache where a
+  chapter is already aligned. Otherwise each chapter's opening words are aligned
+  in a window around an estimate, one chapter after another, each estimate
+  anchored on the last chapter found. It takes about two minutes of CPU per
+  chapter; confirmed times are remembered, so a second `propose` only looks for
+  what's missing. Chapters that can't be confirmed are left out, not guessed.
+- **Writing:** `apply` refuses if ABS's chapters changed since the proposal, or if
+  the book was listened to in the last 24 hours (`--force` overrides). It uses
+  ABS's `POST /api/items/<id>/chapters`, so no restart is needed. ABS stores the
+  list in the item's metadata file, which a library rescan applies last, so the
+  new chapters survive rescans. Backups go to `~/.cache/concordance/chapters/`.
+
 ## Monitoring
 
 Under `~/.cache/concordance/runs/`:

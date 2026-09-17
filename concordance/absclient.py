@@ -173,6 +173,24 @@ class AbsClient:
             raise RuntimeError(f"ABS progress PATCH failed: {exc}") from exc
         return resp.status_code
 
+    def update_chapters(self, library_item_id: str, chapters: list[dict]) -> dict:
+        """Replace a book's chapter list: POST /api/items/<id>/chapters.
+
+        `chapters` is [{"title", "start", "end"}, ...] in seconds. ABS saves it to the
+        database and the item's metadata.json, and notifies open players; no restart.
+        Returns ABS's JSON reply ({"success": true, "updated": bool}).
+        """
+        payload = {"chapters": [{"title": str(c["title"]), "start": float(c["start"]),
+                                 "end": float(c["end"])} for c in chapters]}
+        try:
+            resp = self._session.post(f"{self._base}/api/items/{library_item_id}/chapters",
+                                      json=payload, timeout=self._timeout)
+        except requests.RequestException as exc:
+            raise RuntimeError(f"ABS chapter update failed: {exc}") from exc
+        if resp.status_code != 200:
+            raise RuntimeError(f"ABS chapter update returned HTTP {resp.status_code}")
+        return resp.json()
+
     def progress(self) -> dict[str, AbsProgress]:
         """Current listening progress, keyed by libraryItemId."""
         payload = self._get("/api/me/progress")

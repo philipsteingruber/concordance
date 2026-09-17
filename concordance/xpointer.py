@@ -64,6 +64,7 @@ class Node:
     parent: "Node | None" = None
     children: list["Node"] = field(default_factory=list)
     text: str = ""                       # text nodes only
+    attrs: dict[str, str] = field(default_factory=dict)   # elements only
     # Filled in by build_canonical for text nodes: canonical index of each raw char.
     char_map: list[int] = field(default_factory=list)
     canon_start: int = 0                 # canonical offset at this node's start
@@ -80,13 +81,13 @@ class _TreeBuilder(HTMLParser):
         self.stack = [self.root]
 
     def handle_starttag(self, tag, attrs):
-        node = Node(tag.lower(), parent=self.stack[-1])
+        node = Node(tag.lower(), parent=self.stack[-1], attrs={k: v or "" for k, v in attrs})
         self.stack[-1].children.append(node)
         if node.tag not in VOID_TAGS:
             self.stack.append(node)
 
     def handle_startendtag(self, tag, attrs):
-        node = Node(tag.lower(), parent=self.stack[-1])
+        node = Node(tag.lower(), parent=self.stack[-1], attrs={k: v or "" for k, v in attrs})
         self.stack[-1].children.append(node)
 
     def handle_endtag(self, tag):

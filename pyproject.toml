@@ -20,6 +20,7 @@ classifiers = [
 [project.scripts]
 concordance = "concordance.cli:main"
 concordance-allow = "concordance.allowlist:main"
+concordance-chapters = "concordance.chapters:main"
 
 [build-system]
 requires = ["setuptools>=77"]
