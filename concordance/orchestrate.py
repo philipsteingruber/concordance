@@ -49,6 +49,7 @@ from .matching import load_calibre_isbns, match_pairs
 from .xpointer import XPointerError, resolve_any
 
 ALIGNER_COMMIT = "64293cc6d711e57666c4a8b098e9fd93b381fd88"
+ESTIMATED_PACE = 0.5         # wall-clock seconds per second of audio, measured on 8 CPU threads
 LIBRARY_CONTAINER = "/library"
 # Worker tuning read by concordance/aligner.py inside the container; forwarded when set.
 WORKER_SETTINGS = ("CONCORDANCE_ALIGN_BUDGET_MB", "CONCORDANCE_ALIGN_CHUNK_SECONDS",
@@ -284,6 +285,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--lookahead", type=int, default=int(env_number("CONCORDANCE_ALIGN_LOOKAHEAD", 2, int)),
                     help="chapter groups past the current one to align")
     ap.add_argument("--book-id", type=int, action="append", default=[])
+    ap.add_argument("--planned-only", action="store_true",
+                    help="print only the groups that will run, not skipped or already-fresh ones "
+                         "(the run log keeps everything)")
     ap.add_argument("--min-free-mb", type=int, default=int(env_number("CONCORDANCE_ALIGN_MIN_FREE_MB", 5000, int)),
                     help="start a job only while this much memory is available")
     ap.add_argument("--recheck-minutes", type=float, default=5.0,
@@ -312,11 +316,14 @@ def main(argv: list[str] | None = None) -> int:
     runs.mkdir(parents=True, exist_ok=True)
     log_file = runs / f"align-{datetime.now():%Y%m%d}.jsonl"
 
+    quiet = {"skipped", "fresh"}       # expected outcomes, hidden by --planned-only
+
     def log(record: dict) -> None:
         record = {"at": datetime.now().isoformat(timespec="seconds"), **record}
         with log_file.open("a") as fh:
             fh.write(json.dumps(record) + "\n")
-        print(json.dumps(record))
+        if not (args.planned_only and record.get("status") in quiet):
+            print(json.dumps(record))
 
     try:
         deadline = parse_deadline(args.deadline, datetime.now())
@@ -325,6 +332,11 @@ def main(argv: list[str] | None = None) -> int:
     except (ConfigError, RuntimeError) as exc:
         log({"status": "error", "reason": str(exc)})
         return 1
+
+    if args.planned_only or not args.run:
+        minutes = sum(job.end - job.start for job in jobs) / 60
+        print(f"{len(jobs)} group(s) to align, {minutes:.0f} audio minutes "
+              f"(~{minutes * ESTIMATED_PACE / 60:.1f} h at the measured pace)")
 
     for job in jobs:
         base = {"book": job.title, "group": job.key.filename(), "reason": job.reason,
