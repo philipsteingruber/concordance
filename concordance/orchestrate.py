@@ -43,7 +43,7 @@ from .absclient import AbsClient, AbsProgress
 from .anchor import Alignment, build_alignment
 from .cache import AlignmentCache, GroupKey, manifest_fingerprint
 from .calibre import load_books, read_spine, spine_file
-from .config import Config, ConfigError, env_number
+from .config import Config, ConfigError, ServiceUnavailable, env_number
 from .cwa import CwaClient, CwaProgress
 from .matching import load_calibre_isbns, match_pairs
 from .xpointer import XPointerError, resolve_any
@@ -341,6 +341,9 @@ def main(argv: list[str] | None = None) -> int:
         deadline = parse_deadline(args.deadline, datetime.now())
         cfg = Config.from_env()
         jobs = plan_jobs(cfg, args.lookahead, set(args.book_id) or None, log)
+    except ServiceUnavailable as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
     except (ConfigError, RuntimeError) as exc:
         log({"status": "error", "reason": str(exc)})
         return 1

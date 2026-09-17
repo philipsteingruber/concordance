@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 
 import requests
 
+from .config import ServiceUnavailable, unreachable
+
 
 @dataclass(frozen=True)
 class Chapter:
@@ -87,6 +89,8 @@ class AbsClient:
             resp.raise_for_status()
             return resp.json()
         except requests.RequestException as exc:
+            if unreachable(exc):
+                raise ServiceUnavailable(f"ABS unreachable at {self._base}: {exc}") from exc
             raise RuntimeError(f"ABS request to {path} failed: {exc}") from exc
         except ValueError as exc:
             raise RuntimeError(f"ABS returned a non-JSON body for {path}") from exc
@@ -170,6 +174,8 @@ class AbsClient:
             resp = self._session.patch(f"{self._base}/api/me/progress/{library_item_id}",
                                        json=payload, timeout=self._timeout)
         except requests.RequestException as exc:
+            if unreachable(exc):
+                raise ServiceUnavailable(f"ABS unreachable at {self._base}: {exc}") from exc
             raise RuntimeError(f"ABS progress PATCH failed: {exc}") from exc
         return resp.status_code
 
@@ -186,6 +192,8 @@ class AbsClient:
             resp = self._session.post(f"{self._base}/api/items/{library_item_id}/chapters",
                                       json=payload, timeout=self._timeout)
         except requests.RequestException as exc:
+            if unreachable(exc):
+                raise ServiceUnavailable(f"ABS unreachable at {self._base}: {exc}") from exc
             raise RuntimeError(f"ABS chapter update failed: {exc}") from exc
         if resp.status_code != 200:
             raise RuntimeError(f"ABS chapter update returned HTTP {resp.status_code}")

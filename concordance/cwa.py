@@ -21,6 +21,8 @@ from datetime import datetime
 
 import requests
 
+from .config import ServiceUnavailable, unreachable
+
 KOSYNC_ACCEPT = "application/vnd.koreader.v1+json"
 _DOCFRAGMENT = re.compile(r"DocFragment\[(\d+)\]")
 
@@ -75,7 +77,7 @@ class CwaClient:
         try:
             resp = self._session.get(f"{self._base}/kosync/users/auth", timeout=self._timeout)
         except requests.RequestException as exc:
-            raise RuntimeError(f"CWA unreachable at {self._base}: {exc}") from exc
+            raise ServiceUnavailable(f"CWA unreachable at {self._base}: {exc}") from exc
         return resp.status_code == 200
 
     def locator(self, calibre_book_id: int) -> str | None:
@@ -111,6 +113,8 @@ class CwaClient:
             resp = self._session.put(f"{self._base}/kosync/syncs/progress", json=payload,
                                      timeout=self._timeout)
         except requests.RequestException as exc:
+            if unreachable(exc):
+                raise ServiceUnavailable(f"CWA unreachable at {self._base}: {exc}") from exc
             raise RuntimeError(f"CWA progress PUT failed: {exc}") from exc
         return resp.status_code
 
@@ -126,6 +130,8 @@ class CwaClient:
             resp.raise_for_status()
             payload = resp.json()
         except requests.RequestException as exc:
+            if unreachable(exc):
+                raise ServiceUnavailable(f"CWA unreachable at {self._base}: {exc}") from exc
             raise RuntimeError(f"CWA export failed: {exc}") from exc
         except ValueError as exc:
             raise RuntimeError("CWA export returned a non-JSON body") from exc

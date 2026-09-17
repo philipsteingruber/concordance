@@ -33,7 +33,7 @@ from .absclient import AbsClient, Chapter
 from .cache import AlignmentCache, manifest_fingerprint
 from .calibre import load_books, spine_file
 from .chapterdetect import ChapterStart, book_positions, detect, load_documents
-from .config import Config, ConfigError
+from .config import Config, ConfigError, ServiceUnavailable
 from .matching import load_calibre_isbns, match_pairs, normalise_title
 from .orchestrate import docker_options, state_dir
 
@@ -446,6 +446,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "apply":
             return apply(cfg, client, args.book, args.force)
         return restore(cfg, client, args.book, args.force)
+    except ServiceUnavailable as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
     except (ConfigError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

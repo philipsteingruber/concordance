@@ -19,7 +19,7 @@ import dataclasses
 from .absclient import AbsClient
 from .anchor import build_alignment
 from .calibre import load_books, read_spine, spine_file
-from .config import Config, ConfigError
+from .config import Config, ConfigError, ServiceUnavailable
 from .cwa import CwaClient
 from .matching import load_calibre_isbns, match_pairs
 from .report import PairReport, Report, render_table, write_artifacts
@@ -300,6 +300,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         cfg = Config.from_env()
         report = build_report(cfg, only, args.progress_only, WritePolicy.from_env(args.apply))
+    except ServiceUnavailable as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
     except (ConfigError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

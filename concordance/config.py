@@ -15,6 +15,21 @@ class ConfigError(RuntimeError):
     """Raised when required configuration is missing or unusable."""
 
 
+class ServiceUnavailable(RuntimeError):
+    """A service didn't answer at all (down, restarting, wrong URL).
+
+    Kept apart from other failures so a run that couldn't reach CWA or ABS is
+    distinguishable from one that reached it and was refused: the first is
+    routine while a container restarts, the second means something is wrong.
+    """
+
+
+def unreachable(exc: Exception) -> bool:
+    """Whether a requests failure means "no answer" rather than "answered, badly"."""
+    import requests
+    return isinstance(exc, (requests.ConnectionError, requests.Timeout))
+
+
 def _require(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if not value:
