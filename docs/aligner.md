@@ -83,11 +83,14 @@ single pass: median difference 0.00 s, largest 0.46 s, four words over 0.1 s.
 `python3 -m concordance.orchestrate --run` (see `scripts/cron-align.sh`):
 
 - Plans each in-progress book's current chapter group and the next two
-  (`CONCORDANCE_ALIGN_LOOKAHEAD`), skipping groups with a fresh cache entry. An entry goes stale
+  (`CONCORDANCE_ALIGN_LOOKAHEAD`). A dry run lists the plan; `--planned-only`
+  hides books that are skipped or already aligned, skipping groups with a fresh cache entry. An entry goes stale
   when the book file or any audio file changes size or modification time.
 - Starts a job only when at least 5,000 MB is available (`CONCORDANCE_ALIGN_MIN_FREE_MB`),
   rechecking every 5 minutes for up to `CONCORDANCE_ALIGN_MEMORY_WAIT` minutes.
-- Optionally starts nothing after `CONCORDANCE_ALIGN_DEADLINE`.
+- With `CONCORDANCE_ALIGN_DEADLINE` set, starts nothing after that time, and
+  nothing that wouldn't finish by it at the measured pace (about half of real
+  time). A running job is never interrupted.
 - Runs one container at a time as your user, so the cache isn't root-owned,
   with `CONCORDANCE_ALIGNER_MEMORY` and `CONCORDANCE_ALIGNER_CPU_SHARES`.
 

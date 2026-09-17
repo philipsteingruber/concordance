@@ -104,6 +104,7 @@ Nothing is sent. JSON and Markdown copies go to `~/.cache/concordance/reports/`.
 ```bash
 docker build -f docker/aligner.Dockerfile -t concordance-aligner:latest .
 python3 -m concordance.orchestrate                  # dry run: what it would align
+python3 -m concordance.orchestrate --planned-only   # ...without the skipped and already-aligned books
 python3 -m concordance.orchestrate --run --book-id 123
 ```
 
@@ -125,7 +126,9 @@ installed into a virtualenv, set `CONCORDANCE_PYTHON` to its interpreter.
 Alignment starts a job only while at least 5 GB of memory is free
 (`CONCORDANCE_ALIGN_MIN_FREE_MB`), waiting up to an hour for it. To keep
 alignment inside a quiet window, set `CONCORDANCE_ALIGN_DEADLINE` (e.g.
-`06:00`): no new job starts after it, though a running job finishes.
+`06:00`): no job starts after it, and none starts that the measured pace says
+would still be running at it, so a three-hour group can't begin ten minutes
+before. A job already under way is never interrupted.
 
 ## Enabling writes
 
@@ -180,6 +183,10 @@ concordance-chapters apply 561      # back up ABS's chapter list, then write the
 concordance-chapters restore 561    # put the latest backup back
 ```
 
+Without `pip install`, run `python3 -m concordance.chapters <action> <book>` from
+the repository. `check` costs nothing; `propose` is the slow step, about two
+minutes of CPU per chapter it has to locate.
+
 A book is only touched when it has at least 1.5 times as many real chapters as
 ABS chapters, and only the ABS chapters that contain two or more real chapters
 are rebuilt, together with any short run of slices between them.
@@ -194,6 +201,9 @@ are rebuilt, together with any short run of slices between them.
   anchored on the last chapter found. It takes about two minutes of CPU per
   chapter; confirmed times are remembered, so a second `propose` only looks for
   what's missing. Chapters that can't be confirmed are left out, not guessed.
+- **Keeping alignments:** a cache entry's name carries the ABS chapters it covered,
+  so `apply` renames affected entries to the new numbering. Without that, the next
+  nightly run would align the same audio again.
 - **Writing:** `apply` refuses if ABS's chapters changed since the proposal, or if
   the book was listened to in the last 24 hours (`--force` overrides). It uses
   ABS's `POST /api/items/<id>/chapters`, so no restart is needed. ABS stores the
@@ -242,7 +252,7 @@ day, which means the two sides disagree about which is further, and repeated
 | `CONCORDANCE_ALIGN_BATCH_SIZE` | `1` | Emission batch size; higher is a little faster and uses much more memory |
 | `CONCORDANCE_ALIGNER_THREADS` | torch default | CPU threads per job |
 | `CONCORDANCE_ALIGNER_CPU_SHARES` | `1024` | Raise (e.g. `26192`) to outrank other containers |
-| `CONCORDANCE_ALIGN_DEADLINE` | none | `HH:MM`; no new alignment job after this time |
+| `CONCORDANCE_ALIGN_DEADLINE` | none | `HH:MM`; no alignment job starts after this time, or if it wouldn't finish by it |
 | `CONCORDANCE_ALIGN_MEMORY_WAIT` | `60` | Minutes to wait for free memory before stopping the run |
 | `CONCORDANCE_STATE_DIR` | `~/.cache/concordance` | Cache, run logs and reports |
 | `CONCORDANCE_PYTHON` | `python3` | Interpreter the cron wrappers use |
