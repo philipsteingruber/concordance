@@ -1,7 +1,7 @@
 """Command-line entry point.
 
 Dry run by default: decisions and planned writes are reported, nothing is sent.
-`--apply` writes only for books listed in CONCORDANCE_WRITE_ALLOWLIST, and only
+`--apply` writes only for books in the write allowlist (allowlist.py), and only
 for precise-enough tiers (see writer.py).
 """
 
@@ -279,7 +279,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--log-dir", default=None,
                         help="where JSON/markdown reports go (default: <state dir>/reports)")
     parser.add_argument("--apply", action="store_true",
-                        help="apply writes for books in CONCORDANCE_WRITE_ALLOWLIST "
+                        help="apply writes for books in the write allowlist "
                              "(default: dry run, nothing is written)")
     parser.add_argument("--state-dir", default=None,
                         help="also save last-sync.json and append applied writes to "

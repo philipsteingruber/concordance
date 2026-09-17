@@ -81,6 +81,9 @@ reset_sandbox() {
 # so a cache entry built later can't silently change what an existing test checks.
 EMPTY_CACHE=$(mktemp -d)
 export CONCORDANCE_CACHE_DIR="$EMPTY_CACHE"
+# Each test sets the allowlist itself through CONCORDANCE_WRITE_ALLOWLIST, so the
+# real allowlist file mustn't leak in (it would break the "not allowlisted" test).
+export CONCORDANCE_WRITE_ALLOWLIST_FILE=/dev/null
 REAL_CACHE="${CONCORDANCE_STATE_DIR:-$HOME/.cache/concordance}/alignments"
 
 use_real_cache() {  # opt a test in to the real alignment cache (the profile's entry must exist)

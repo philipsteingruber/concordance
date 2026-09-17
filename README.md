@@ -129,20 +129,28 @@ alignment inside a quiet window, set `CONCORDANCE_ALIGN_DEADLINE` (e.g.
 
 ## Enabling writes
 
-Nothing is written for a book until its Calibre id is in
-`CONCORDANCE_WRITE_ALLOWLIST`; until then the sync only reports. Enable books one
-at a time:
+Nothing is written for a book until its Calibre id is in the write allowlist;
+until then the sync only reports. Manage it with `concordance-allow`:
 
-1. Pick a test book you aren't reading. Set progress on one side, run
-   `concordance --book-id <id> --apply` with that id allowlisted, and check where
-   you land on the other side.
+```bash
+concordance-allow add 561       # adds "561  # Misery" to ./allowlist
+concordance-allow remove 561
+```
+
+The allowlist is a plain file, `allowlist` in the repository root (git-ignored),
+with one id per line. Ids in `CONCORDANCE_WRITE_ALLOWLIST` count too. Enable
+books one at a time:
+
+1. Pick a test book you aren't reading. Set progress on one side, allowlist it,
+   run `concordance --book-id <id> --apply`, and check where you land on the
+   other side.
 2. Add one real book. Read the next sync's output, then listen or read and check
    the position.
 3. Add more.
 
-Values in `.env` can't contain spaces: write `CONCORDANCE_WRITE_ALLOWLIST=12,34`,
-not `12, 34`. With a space, the shell runs `34` as a command and the list ends up
-empty.
+Values in `.env` can't contain spaces. If you set `CONCORDANCE_WRITE_ALLOWLIST`
+there, write `12,34`, not `12, 34`: with a space, the shell runs `34` as a
+command and the list ends up empty.
 
 **What you'll see in KOReader.** When you open a book, the CWA plugin fetches the
 latest position and asks something like *"Sync to latest location 36% from
@@ -176,7 +184,8 @@ day, which means the two sides disagree about which is further, and repeated
 | `CALIBRE_ROOT` | — | Calibre library directory |
 | `CALIBRE_DB` | `$CALIBRE_ROOT/metadata.db` | Calibre database |
 | `ABS_AUDIO_ROOT_MAP` | — | `<path in ABS>=<path on host>`; required for alignment |
-| `CONCORDANCE_WRITE_ALLOWLIST` | empty | Calibre ids that may be written |
+| `CONCORDANCE_WRITE_ALLOWLIST_FILE` | `./allowlist` | Allowlist file edited by `concordance-allow` |
+| `CONCORDANCE_WRITE_ALLOWLIST` | empty | More Calibre ids that may be written, comma-separated |
 | `CONCORDANCE_WRITE_TIERS` | `aligned,interpolated,finished` | Tiers that may be written |
 | `CONCORDANCE_REWIND_SECONDS` | `150` | How early audiobook writes land |
 | `CONCORDANCE_CWA_PERCENT_MARGIN` | `2.0` | Points subtracted from written ebook percentages |

@@ -8,3 +8,5 @@ logs/
 
 # Credentials: loaded by scripts/cron-*.sh, never committed
 .env
+# Local write allowlist (concordance-allow)
+/allowlist

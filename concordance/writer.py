@@ -3,9 +3,9 @@
 Dry run by default. A write is only *applied* when all of these hold:
 
 1. `--apply` was given on the command line;
-2. the book's Calibre id is in `CONCORDANCE_WRITE_ALLOWLIST` (comma-separated),
-   so writes can be enabled one book at a time: sandbox, then one real book,
-   then more;
+2. the book's Calibre id is in the write allowlist (the `allowlist` file, see
+   allowlist.py, or `CONCORDANCE_WRITE_ALLOWLIST`), so writes can be enabled one
+   book at a time: a test book, then one real book, then more;
 3. the decision's tier is in `CONCORDANCE_WRITE_TIERS` (default
    `aligned,interpolated,finished`). `anchor` (chapter start, typically ~10 min
    out) and `percentage` tiers miss the one-minute bar and are never written by
@@ -31,6 +31,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .allowlist import allowlist_path, env_ids, read_ids
 from .decide import Decision
 from .xpointer import Document, parse_document, spine_documents, to_xpointer
 
@@ -53,8 +54,7 @@ class WritePolicy:
 
     @classmethod
     def from_env(cls, apply: bool) -> "WritePolicy":
-        raw = os.environ.get("CONCORDANCE_WRITE_ALLOWLIST", "")
-        ids = frozenset(int(x) for x in raw.replace(" ", "").split(",") if x.strip().isdigit())
+        ids = frozenset(env_ids() | read_ids(allowlist_path()))
         tiers_raw = os.environ.get("CONCORDANCE_WRITE_TIERS", "")
         tiers = tuple(t.strip() for t in tiers_raw.split(",") if t.strip()) or DEFAULT_WRITE_TIERS
         return cls(apply=apply, allowlist=ids, tiers=tiers)
@@ -149,7 +149,7 @@ def gate(plan: PlannedWrite, decision: Decision, policy: WritePolicy) -> Planned
     if not policy.apply:
         plan.blocked_by.append("dry run (no --apply)")
     if plan.calibre_book_id not in policy.allowlist:
-        plan.blocked_by.append("not in CONCORDANCE_WRITE_ALLOWLIST")
+        plan.blocked_by.append("not in the write allowlist")
     if (decision.tier or "") not in policy.tiers:
         plan.blocked_by.append(f"tier '{decision.tier}' not in CONCORDANCE_WRITE_TIERS")
     return plan
