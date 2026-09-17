@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+build/
+dist/
+*.egg-info/
+logs/
+
+# Credentials: loaded by scripts/cron-*.sh, never committed
+.env
