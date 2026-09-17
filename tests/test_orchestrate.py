@@ -11,7 +11,8 @@ from concordance.cwa import CwaProgress
 from concordance.cache import GroupKey
 from concordance.config import Config, ConfigError
 from concordance.orchestrate import (Job, aligner_stats, alignment_status, current_group_index, docker_command,
-                                     group_span, in_progress, memory_wait_until, parse_deadline, select_groups)
+                                     fits_before_deadline, group_span, in_progress, memory_wait_until,
+                                     parse_deadline, select_groups)
 
 # Four equal 1000 s chapters, four equal spine items (5-8): a clean 1:1 book.
 SPINE = [SpineItem(index=i, href=f"c{i}.xhtml", chars=20_000) for i in (5, 6, 7, 8)]
@@ -121,6 +122,17 @@ class DeadlineTest(unittest.TestCase):
     def test_rejects_a_deadline_that_is_not_hours_and_minutes(self):
         with self.assertRaises(ConfigError):
             parse_deadline("2am", self.now)
+
+    def test_starts_a_group_that_fits_before_the_deadline(self):
+        deadline = datetime(2026, 9, 17, 2, 0)
+        self.assertTrue(fits_before_deadline(60 * 60, self.now, deadline))
+
+    def test_skips_a_group_that_would_still_be_running_at_the_deadline(self):
+        deadline = datetime(2026, 9, 17, 1, 0)
+        self.assertFalse(fits_before_deadline(4 * 60 * 60, self.now, deadline))
+
+    def test_starts_any_group_when_no_deadline_is_set(self):
+        self.assertTrue(fits_before_deadline(40 * 60 * 60, self.now, None))
 
     def test_waits_for_memory_up_to_the_wait_limit_without_a_deadline(self):
         self.assertEqual(memory_wait_until(self.now, 60, None), datetime(2026, 9, 17, 1, 5))

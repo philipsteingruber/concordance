@@ -11,9 +11,9 @@ at a time in the aligner container, and each is guarded:
   deadline), then stops the run. Books without a cache entry still sync by
   estimation.
 * **deadline (optional):** with `CONCORDANCE_ALIGN_DEADLINE=HH:MM` (or
-  `--deadline`), no new job starts after that time, e.g. to keep alignment inside
-  a quiet window. A job already running finishes. Unset, the run continues until
-  the queue is empty.
+  `--deadline`), no new job starts after that time, and no job starts that the
+  measured pace says would still be running at it. A job already under way
+  finishes. Unset, the run continues until the queue is empty.
 * **CPU:** the container runs at `CONCORDANCE_ALIGNER_CPU_SHARES` (Docker's
   default 1024). Raising it lets alignment outrank other containers competing for
   the CPU overnight; on cgroup v2 the shares map non-linearly to `cpu.weight`
@@ -260,6 +260,18 @@ def run_job(job: Job, cfg: Config, cache_root: Path) -> tuple[int, dict]:
     return result.returncode, aligner_stats(result.stdout)
 
 
+def fits_before_deadline(audio_seconds: float, now: datetime, deadline: datetime | None,
+                        pace: float = ESTIMATED_PACE) -> bool:
+    """Whether a group this long can finish before the deadline, at the measured pace.
+
+    The deadline only stops new jobs, so without this a 3-hour group starting five
+    minutes before it would run deep into the morning.
+    """
+    if deadline is None:
+        return True
+    return now + timedelta(seconds=audio_seconds * pace) <= deadline
+
+
 def parse_deadline(value: str | None, now: datetime) -> datetime | None:
     """The next occurrence of HH:MM after `now`, or None when no deadline is set."""
     if not value:
@@ -353,6 +365,10 @@ def main(argv: list[str] | None = None) -> int:
         else:
             if deadline and datetime.now() >= deadline:
                 log({**base, "status": "skipped-deadline"})
+                continue
+            if not fits_before_deadline(job.end - job.start, datetime.now(), deadline):
+                log({**base, "status": "skipped-deadline", "reason": "would not finish before the deadline",
+                     "estimated_minutes": round((job.end - job.start) * ESTIMATED_PACE / 60)})
                 continue
             started = time.time()
             code, stats = run_job(job, cfg, cache_root)
