@@ -331,6 +331,41 @@ def propose(cfg: Config, abs_client: AbsClient, query: str) -> int:
     return 0
 
 
+def renumber_cache(cfg: Config, book: Book, new_chapters: list[dict]) -> list[str]:
+    """Rename alignment cache entries to the new ABS chapter numbers.
+
+    A cache entry's filename carries the ABS chapters its audio span covered
+    (`kepub-sp10-10-ch1-3.json.gz`). Splitting a book's chapters renumbers them, so
+    the nightly planner would look for a name that no longer exists and align the
+    same audio again. The audio span and spine range are unchanged, so the entry is
+    still valid: only its name needs to follow. Returns the renamed files.
+    """
+    numbered = [(i, float(c["start"]), float(c["end"]))
+                for i, c in enumerate(new_chapters, start=1)
+                if float(c["end"]) - float(c["start"]) >= 60.0]
+
+    def chapter_at(t: float) -> int | None:
+        return next((i for i, start, end in numbered if start <= t < end), None)
+
+    cache = AlignmentCache()
+    renamed = []
+    for entry in cache.entries_for(book.calibre_id):
+        if entry.key.library_item_id != book.item_id:
+            continue
+        first = chapter_at(entry.audio_start + 0.5)
+        last = chapter_at(max(entry.audio_start, entry.audio_end - 0.5))
+        if first is None or last is None:
+            continue
+        new_key = dataclasses.replace(entry.key, first_chapter=first, last_chapter=last)
+        if new_key.filename() == entry.key.filename():
+            continue
+        old_path = cache.path(entry.key)
+        cache.save(dataclasses.replace(entry, key=new_key))
+        old_path.unlink(missing_ok=True)
+        renamed.append(f"{entry.key.filename()} -> {new_key.filename()}")
+    return renamed
+
+
 def _same(chapters: list[Chapter], saved: list[dict]) -> bool:
     return len(chapters) == len(saved) and all(
         c.title == s["title"] and abs(c.start - s["start"]) < 0.01 and abs(c.end - s["end"]) < 0.01
@@ -347,11 +382,14 @@ def _refuse_if_listening(abs_client: AbsClient, item_id: str, force: bool) -> bo
     return False
 
 
-def _write(abs_client: AbsClient, item_id: str, current: list[Chapter], new: list[dict], label: str) -> int:
+def _write(abs_client: AbsClient, item_id: str, current: list[Chapter], new: list[dict], label: str,
+           renamed: list[str] | None = None) -> int:
     backup = chapter_dir() / f"{item_id}-backup-{datetime.now():%Y%m%dT%H%M%S}.json"
     backup.write_text(json.dumps([dataclasses.asdict(c) for c in current], indent=1))
     reply = abs_client.update_chapters(item_id, new)
     written = abs_client.chapters(item_id)
+    for line in renamed or []:
+        print(f"  cache entry renamed: {line}")
     if len(written) != len(new):
         print(f"error: ABS now reports {len(written)} chapters, expected {len(new)}. "
               f"Backup: {backup}", file=sys.stderr)
@@ -373,7 +411,8 @@ def apply(cfg: Config, abs_client: AbsClient, query: str, force: bool) -> int:
         return 1
     if _refuse_if_listening(abs_client, book.item_id, force):
         return 1
-    return _write(abs_client, book.item_id, book.chapters, proposal["after"], book.title)
+    renamed = renumber_cache(cfg, book, proposal["after"])
+    return _write(abs_client, book.item_id, book.chapters, proposal["after"], book.title, renamed)
 
 
 def restore(cfg: Config, abs_client: AbsClient, query: str, force: bool) -> int:
@@ -386,7 +425,8 @@ def restore(cfg: Config, abs_client: AbsClient, query: str, force: bool) -> int:
         return 1
     saved = json.loads(backups[-1].read_text())
     print(f"Restoring {backups[-1].name}")
-    return _write(abs_client, book.item_id, book.chapters, saved, f"{book.title} restored")
+    renamed = renumber_cache(cfg, book, saved)
+    return _write(abs_client, book.item_id, book.chapters, saved, f"{book.title} restored", renamed)
 
 
 def main(argv: list[str] | None = None) -> int:

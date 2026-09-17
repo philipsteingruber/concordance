@@ -1,4 +1,9 @@
+import types
 import unittest
+import unittest.mock
+from pathlib import Path
+
+from concordance import chapters as chapters_mod
 
 from concordance.absclient import Chapter
 from concordance.chapterdetect import ChapterStart, _label_parts, _numbered_runs, chapter_number, heading_blocks
@@ -92,6 +97,42 @@ class BuildChaptersTest(unittest.TestCase):
         abs_chapters = chapters((0, 100), (100, 200))
         new = build_chapters(abs_chapters, [(0, 1)], [])
         self.assertEqual([c["title"] for c in new], ["Slice 1", "Slice 2"])
+
+
+class RenumberCacheTest(unittest.TestCase):
+    """The rename that keeps an aligned group valid after its chapters are renumbered."""
+
+    def setUp(self):
+        import tempfile
+        from concordance.cache import AlignmentCache, Entry, FileFingerprint, GroupKey
+        fingerprint = FileFingerprint("x", 1, 2)
+        self.dir = tempfile.TemporaryDirectory()
+        self.cache = AlignmentCache(Path(self.dir.name))
+        self.key = GroupKey(561, "item", "kepub", 10, 10, 1, 3)
+        self.entry = Entry(key=self.key, items=[(10, 0, 100)], audio_start=0.0, audio_end=13000.0,
+                           book_file=fingerprint, audio_file=fingerprint, aligner={}, words=[(0, 4, 1.0, 1.5, -0.1)])
+        self.cache.save(self.entry)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def renumber(self, new_chapters):
+        book = types.SimpleNamespace(calibre_id=561, item_id="item")
+        with unittest.mock.patch("concordance.chapters.AlignmentCache", return_value=self.cache):
+            return chapters_mod.renumber_cache(None, book, new_chapters)
+
+    def test_renames_an_entry_to_the_new_chapter_numbers(self):
+        new = [{"title": f"Chapter {i}", "start": i * 500.0, "end": (i + 1) * 500.0} for i in range(30)]
+        renamed = self.renumber(new)
+        self.assertEqual(renamed, ["561/kepub-sp10-10-ch1-3.json.gz -> 561/kepub-sp10-10-ch1-26.json.gz"])
+        self.assertTrue((Path(self.dir.name) / "561/kepub-sp10-10-ch1-26.json.gz").exists())
+        self.assertFalse((Path(self.dir.name) / "561/kepub-sp10-10-ch1-3.json.gz").exists())
+
+    def test_leaves_an_entry_alone_when_its_numbers_do_not_change(self):
+        new = [{"title": "a", "start": 0.0, "end": 6000.0}, {"title": "b", "start": 6000.0, "end": 9000.0},
+               {"title": "c", "start": 9000.0, "end": 14000.0}]
+        self.assertEqual(self.renumber(new), [])
+        self.assertTrue((Path(self.dir.name) / "561/kepub-sp10-10-ch1-3.json.gz").exists())
 
 
 class ProbeTest(unittest.TestCase):
