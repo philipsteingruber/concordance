@@ -158,9 +158,35 @@ class Entry:
         return spine_index, 0, w[4]
 
     def mean_score(self, around_seconds: float, window: float = 30.0) -> float | None:
-        """Mean word score within ±window of a time: the confidence gate for a write."""
+        """Mean word score within ±window of a time: the confidence gate for a write.
+
+        Positional, so it is the right gate for "can this exact position be
+        trusted" and the wrong one for "did this entry align correctly": at the
+        first or last word the window is one-sided, and the opening words of a
+        chapter score badly often enough (an unspoken heading, a part
+        announcement) to sink the average. Use `overall_score` for the entry.
+        """
         scores = [w[4] for w in self.words if abs(w[2] - around_seconds) <= window]
         return sum(scores) / len(scores) if scores else None
+
+    def overall_score(self) -> float | None:
+        """Mean word score across the whole entry: did this alignment match at all."""
+        return sum(w[4] for w in self.words) / len(self.words) if self.words else None
+
+    def item_bounds(self) -> list[tuple[int, int, float, int, float]]:
+        """Per spine item: (spine, first offset, its time, last offset, its time).
+
+        The ends of an item are the only points where the character-to-time rate
+        is known to change abruptly, because the audio between two items can hold
+        a part announcement or music that carries no book text at all.
+        """
+        out = []
+        for spine, _, length in self.items:
+            if length <= 0:
+                continue
+            last = length - 1
+            out.append((spine, 0, self.time_for(spine, 0)[0], last, self.time_for(spine, last)[0]))
+        return out
 
     # -- freshness --------------------------------------------------------------
 

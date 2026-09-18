@@ -40,6 +40,12 @@ from .orchestrate import docker_options, state_dir
 MIN_STARTS = 2               # an ABS chapter is split only if it holds at least this many real starts
 MIN_RATIO = 1.5              # ...and the book has at least this many real chapters per ABS chapter
 MAX_GAP = 3                  # unsplit ABS chapters between split ones are rebuilt too, up to this many
+# A detected start this close to the one before it is not a chapter worth marking.
+# Misery's Part Three alternates between Paul's narrative and the manuscript he is
+# typing, numbering each switch, so starts land 353 characters apart - about two
+# seconds of narration. Marking those produces chapters nobody can navigate by,
+# and the aligner cannot tell them apart either.
+MIN_CHAPTER_CHARS = 1500
 SNAP_SECONDS = 20.0          # a real start this close to a region's start replaces it
 LEAD_SECONDS = 0.5           # chapter marks sit this far before the first spoken word
 MIN_CHAPTER_SECONDS = 5.0
@@ -165,31 +171,80 @@ def find_book(cfg: Config, abs_client: AbsClient, query: str) -> Book:
     fmt, book_file = chosen
     docs = load_documents(book_file)
     item = pair.audiobook.library_item_id
+    positions = book_positions(docs)
     return Book(pair.calibre.book_id, pair.calibre.title, item, fmt, book_file, docs,
-                detect(book_file, docs), book_positions(docs), abs_client.chapters(item),
-                abs_client.audio_manifest(item))
+                drop_crowded(detect(book_file, docs), positions), positions,
+                abs_client.chapters(item), abs_client.audio_manifest(item))
 
 
-def cached_times(cfg: Config, book: Book) -> dict[int, float]:
-    """Start index -> time, for starts inside a fresh, trusted alignment cache entry."""
+def drop_crowded(starts: list[ChapterStart], positions: dict[int, int]) -> list[ChapterStart]:
+    """Keep the first of any run of starts closer together than MIN_CHAPTER_CHARS."""
+    kept: list[ChapterStart] = []
+    last: int | None = None
+    for start in starts:
+        if start.spine not in positions:
+            continue
+        here = positions[start.spine] + start.offset
+        if last is None or here - last >= MIN_CHAPTER_CHARS:
+            kept.append(start)
+            last = here
+    return kept
+
+
+def _fresh_entries(cfg: Config, book: Book) -> list:
+    """This book's cache entries that still match the files on disk."""
     abs_root, host_root = cfg.abs_audio_root or ("", "")
     try:
         audio_print = manifest_fingerprint([Path(p.replace(abs_root, host_root, 1)) for p, _ in book.manifest])
     except OSError:
-        return {}
-    out: dict[int, float] = {}
+        return []
+    out = []
     for entry in AlignmentCache().entries_for(book.calibre_id):
         if entry.key.fmt != book.fmt or entry.key.library_item_id != book.item_id:
             continue
-        if not entry.is_fresh(book.book_file, audio_print, entry.aligner):
+        if entry.is_fresh(book.book_file, audio_print, entry.aligner):
+            out.append(entry)
+    return out
+
+
+def cached_times(cfg: Config, book: Book) -> dict[int, float]:
+    """Start index -> time, for starts inside a fresh, trusted alignment cache entry."""
+    out: dict[int, float] = {}
+    for entry in _fresh_entries(cfg, book):
+        # Whether the entry aligned at all is a property of the entry. Asking
+        # instead for the mean score in a window around the looked-up time
+        # rejected correct answers at every item boundary: a chapter starting at
+        # offset 0 scores its one-sided opening window, and a heading the
+        # narrator doesn't read sinks it. Misery's "Part Two, Chapter 15" sat at
+        # spine 14 offset 0 with a true time in the cache and scored -8.99 there,
+        # so it was sent to the aligner, which then searched the wrong place.
+        overall = entry.overall_score()
+        if overall is None or overall < cfg.min_align_score:
             continue
         spines = {item[0]: item[2] for item in entry.items}
         for k, start in enumerate(book.starts):
             if start.spine in spines and start.offset < spines[start.spine]:
-                seconds, _ = entry.time_for(start.spine, start.offset)
-                score = entry.mean_score(seconds)
-                if score is not None and score >= cfg.min_align_score:
-                    out[k] = seconds
+                out[k] = entry.time_for(start.spine, start.offset)[0]
+    return out
+
+
+def entry_anchors(cfg: Config, book: Book) -> list[tuple[int, float]]:
+    """Both ends of every aligned spine item, as (book character, seconds).
+
+    Estimates interpolate the character-to-time rate between anchors, which is
+    only valid where the narration runs continuously. Between two spine items it
+    often does not: Misery has 416 seconds of part announcement between spine 13
+    and spine 14 that carry no book text, and interpolating across it put the
+    estimate for the chapter at the start of spine 14 392 seconds early - far
+    enough that the search window never contained the answer. Pinning both ends
+    of each aligned item keeps every interpolation inside continuous narration.
+    """
+    out: list[tuple[int, float]] = []
+    for entry in _fresh_entries(cfg, book):
+        for spine, first, first_t, last, last_t in entry.item_bounds():
+            if spine in book.positions:
+                out.append((book.positions[spine] + first, first_t))
+                out.append((book.positions[spine] + last, last_t))
     return out
 
 
@@ -272,6 +327,7 @@ def propose(cfg: Config, abs_client: AbsClient, query: str) -> int:
     cached = {**remembered, **cached_times(cfg, book)}
     anchors = [(0, 0.0), (book.positions[-1], book.duration)]
     anchors += [(book.pos(book.starts[k]), t) for k, t in cached.items()]
+    anchors += entry_anchors(cfg, book)
     probe = [k for k in in_scope if k not in cached]
     print(f"{book.title}: {len(in_scope)} chapter starts in {len(spans)} region(s); "
           f"{len(in_scope) - len(probe)} already known (alignment cache or an earlier propose), "

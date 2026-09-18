@@ -14,6 +14,12 @@ known point itself, so estimation error never builds up across a long stretch:
 the next chapter is only ever estimated from the last one found. A window that
 misses (low score, or the words land against its edge) is doubled once.
 
+Chapter starts must come out strictly increasing, so a confirmed start is also
+required to be later than the one before it. That backstop does not depend on
+any theory about why a window was wrong, which is the point of it: an earlier
+attempt to be clever about which edges count "confirmed" three consecutive
+chapters at one timestamp.
+
 One JSON line per target goes to stdout as it's decided.
 """
 
@@ -27,6 +33,11 @@ from pathlib import Path
 
 MIN_HALF_WINDOW = 60.0
 MAX_HALF_WINDOW = 480.0
+# The estimate interpolates across the gap between the known points either side,
+# and that error is linear in the gap - worst case about 2% of it. Sizing from
+# the gap rather than from where in it the estimate falls, with room to spare,
+# because a window one second too narrow costs a whole retry.
+SPAN_FRACTION = 0.05
 EDGE_SECONDS = 3.0
 SCORED_WORDS = 12
 
@@ -43,20 +54,36 @@ def estimate(anchors: list[tuple[int, float]], pos: int) -> tuple[float, float, 
     return before[1] + fraction * (after[1] - before[1]), before[1], after[1]
 
 
-def half_window(est: float, known_before: float) -> float:
-    """Wider the further the estimate is from the last known point."""
-    return min(MAX_HALF_WINDOW, max(MIN_HALF_WINDOW, 0.06 * (est - known_before) + 45.0))
+def half_window(known_before: float, known_after: float) -> float:
+    """Sized from the gap being interpolated across, not from where in it the estimate falls."""
+    return min(MAX_HALF_WINDOW, max(MIN_HALF_WINDOW, SPAN_FRACTION * (known_after - known_before)))
 
 
-def judge(words: list[dict], lo: float, hi: float, min_score: float) -> tuple[bool, float, float]:
-    """(accepted, absolute start, mean score of the opening words)."""
+def judge(words: list[dict], lo: float, hi: float, min_score: float,
+          floor: float | None = None) -> tuple[bool, float, float, str]:
+    """(accepted, absolute start, mean score of the opening words, reason if rejected).
+
+    A match against either edge is rejected however well it scores. The aligner
+    always returns its best placement inside the span it was given, so text that
+    is not in that span comes back pinned to an end - with a good score, because
+    the score measures how well those words match wherever they were put, not
+    whether they belong there. `floor` is the previous confirmed chapter: a start
+    at or before it is impossible whatever the window did.
+    """
     if not words:
-        return False, lo, -99.0
+        return False, lo, -99.0, "no words"
     head = words[:SCORED_WORDS]
     score = sum(w["score"] for w in head) / len(head)
     start = lo + words[0]["start"]
-    inside = start - lo >= EDGE_SECONDS and hi - start >= EDGE_SECONDS
-    return score >= min_score and inside, start, score
+    if score < min_score:
+        return False, start, score, "score"
+    if start - lo < EDGE_SECONDS:
+        return False, start, score, "pinned to the start of the search span"
+    if hi - start < EDGE_SECONDS:
+        return False, start, score, "pinned to the end of the search span"
+    if floor is not None and start <= floor:
+        return False, start, score, "at or before the previous chapter"
+    return True, start, score, ""
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -75,10 +102,11 @@ def main(argv: list[str] | None = None) -> int:
         torch.set_num_threads(threads)
     model, tokenizer = load_alignment_model("cpu", dtype=torch.float32)
 
+    last_confirmed: float | None = None
     for target in sorted(job["targets"], key=lambda t: t["pos"]):
         t0 = time.time()
         est, known_before, known_after = estimate(anchors, target["pos"])
-        half = half_window(est, known_before)
+        half = half_window(known_before, known_after if known_after > known_before else est)
         result = {"id": target["id"], "estimate": round(est, 1), "status": "unconfirmed"}
         for attempt in range(2):
             lo = max(0.0, known_before, est - half)
@@ -87,12 +115,15 @@ def main(argv: list[str] | None = None) -> int:
                 break
             emissions, stride = sliced_emissions(model, decode_audio(manifest, lo, hi), 0, 1)
             words = align_text(emissions, stride, tokenizer, target["text"])
-            ok, start, score = judge(words, lo, hi, min_score)
+            ok, start, score, why = judge(words, lo, hi, min_score, floor=last_confirmed)
             result.update({"window": [round(lo, 1), round(hi, 1)], "score": round(score, 3),
-                           "attempts": attempt + 1})
+                           "landed": round(start, 1), "attempts": attempt + 1})
+            result["why"] = why
             if ok:
                 result.update({"status": "confirmed", "time": round(start, 2)})
+                result.pop("why", None)
                 bisect.insort(anchors, (int(target["pos"]), start))
+                last_confirmed = start
                 break
             half = min(MAX_HALF_WINDOW * 2, half * 2)
         result["seconds"] = round(time.time() - t0)
