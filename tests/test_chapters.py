@@ -7,7 +7,7 @@ from concordance import chapters as chapters_mod
 
 from concordance.absclient import Chapter
 from concordance.chapterdetect import ChapterStart, _label_parts, _numbered_runs, chapter_number, heading_blocks
-from concordance.chapterprobe import estimate, half_window, judge
+from concordance.chapterprobe import estimate, half_window, judge, observed_rate
 from concordance.chapters import build_chapters, regions
 from concordance.xpointer import parse_document
 
@@ -279,6 +279,39 @@ class DropCrowdedTest(unittest.TestCase):
         fast = chapters_mod.drop_crowded(self.starts(0, 700), {1: 0},
                                          total_chars=360_000, duration=3_600.0)  # 100 chars/s
         self.assertEqual((len(slow), len(fast)), (2, 1))
+
+
+class TailEstimateTest(unittest.TestCase):
+    """Past the last measured anchor, extrapolate; don't pin to a fictional endpoint.
+
+    The end of the audio used to be an anchor, which asserts the ebook's last
+    character is spoken at the last second. Misery ends with a preview of another
+    novel - 3.3% of the text, about twenty minutes of narration that does not
+    exist - so every estimate after the final confirmed chapter was dragged early
+    enough that none could be found.
+    """
+
+    ANCHORS = [(0, 0.0), (1000, 100.0), (2000, 200.0), (3000, 300.0)]
+
+    def test_extrapolates_past_the_last_anchor_at_the_measured_rate(self):
+        self.assertAlmostEqual(estimate(self.ANCHORS, 4000, rate=10.0, limit=9999.0)[0], 400.0)
+
+    def test_does_not_pin_a_later_position_to_the_last_known_time(self):
+        self.assertGreater(estimate(self.ANCHORS, 4000, rate=10.0, limit=9999.0)[0], 300.0)
+
+    def test_never_estimates_past_the_end_of_the_audio(self):
+        self.assertEqual(estimate(self.ANCHORS, 999_999, rate=10.0, limit=500.0)[0], 500.0)
+
+    def test_still_interpolates_between_two_anchors(self):
+        self.assertAlmostEqual(estimate(self.ANCHORS, 1500, rate=10.0, limit=9999.0)[0], 150.0)
+
+    def test_takes_the_median_gap_rather_than_the_most_recent_one(self):
+        """One slow gap at the end would otherwise skew the whole tail."""
+        anchors = [(0, 0.0), (1000, 100.0), (2000, 200.0), (2400, 300.0)]
+        self.assertAlmostEqual(observed_rate(anchors, 99.0), 10.0)
+
+    def test_falls_back_when_no_pair_of_anchors_can_give_a_rate(self):
+        self.assertEqual(observed_rate([(0, 0.0)], 14.4), 14.4)
 
 
 class ProbeTest(unittest.TestCase):

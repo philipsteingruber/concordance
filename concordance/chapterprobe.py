@@ -3,7 +3,8 @@
 Input is a JSON file written by `concordance.chapters`:
 
     {"manifest": [[path, seconds], ...],
-     "anchors": [[book_char, audio_seconds], ...],      # known points, at least start and end
+     "anchors": [[book_char, audio_seconds], ...],      # measured points only
+     "total_chars": 634647,                             # for the fallback rate
      "targets": [{"id": 3, "pos": 81234, "text": "Chapter 3 The next morning..."}, ...],
      "min_score": -0.5}
 
@@ -27,6 +28,7 @@ from __future__ import annotations
 
 import bisect
 import json
+import statistics
 import sys
 import time
 from pathlib import Path
@@ -37,12 +39,45 @@ EDGE_SECONDS = 3.0
 SCORED_WORDS = 12
 
 
-def estimate(anchors: list[tuple[int, float]], pos: int) -> tuple[float, float, float]:
-    """(estimated seconds, seconds of the known point before, seconds of the known point after)."""
+def observed_rate(anchors: list[tuple[int, float]], fallback: float) -> float:
+    """Characters of book per second of audio: the median gap between anchors.
+
+    The median rather than the most recent gap, which is noisy enough to matter
+    when it is extrapolated across the rest of a book. On the book this was built
+    for, the last gap alone says 12.31 characters per second and the median says
+    14.02, against 14.05 measured across the whole narrated span; the error from
+    the last gap reaches six minutes by the end of the tail.
+
+    `fallback` is the whole-book rate, for a book with no measured pair yet -
+    one whose very first chapter failed to confirm.
+    """
+    rates = [(b[0] - a[0]) / (b[1] - a[1])
+             for a, b in zip(anchors, anchors[1:]) if b[1] > a[1] and b[0] > a[0]]
+    return statistics.median(rates) if rates else fallback
+
+
+def estimate(anchors: list[tuple[int, float]], pos: int, rate: float | None = None,
+             limit: float | None = None) -> tuple[float, float, float]:
+    """(estimated seconds, seconds of the known point before, seconds of the known point after).
+
+    Past the last anchor the position is extrapolated at `rate` rather than
+    pinned to the last known time. Anchors are measurements - a cached word
+    timing, or a chapter already confirmed - and the end of the audio is not one
+    of them: an ebook routinely carries matter the audiobook never reads. Misery
+    ends with a preview of a different novel, 3.3% of the text and about twenty
+    minutes of narration that does not exist, and treating the last character as
+    the last second dragged every estimate after the final confirmed chapter far
+    enough early that none of them could be found.
+    """
     positions = [a[0] for a in anchors]
     i = bisect.bisect_right(positions, pos)
     before = anchors[max(i - 1, 0)]
-    after = anchors[min(i, len(anchors) - 1)]
+    if i >= len(anchors):
+        if rate and rate > 0:
+            seconds = before[1] + (pos - before[0]) / rate
+            return (min(seconds, limit) if limit else seconds), before[1], limit or seconds
+        return before[1], before[1], limit or before[1]
+    after = anchors[i]
     if after[0] == before[0]:
         return before[1], before[1], after[1]
     fraction = (pos - before[0]) / (after[0] - before[0])
@@ -97,8 +132,10 @@ def main(argv: list[str] | None = None) -> int:
     job = json.loads(Path((argv or sys.argv[1:])[0]).read_text())
     manifest = [(Path(p), float(d)) for p, d in job["manifest"]]
     anchors = sorted((int(p), float(t)) for p, t in job["anchors"])
-    min_score = float(job.get("min_score", -1.0))
+    min_score = float(job.get("min_score", -0.5))
     total = sum(d for _, d in manifest)
+    # Whole-book characters per second, for a book with no measured rate yet.
+    fallback_rate = (float(job["total_chars"]) / total) if job.get("total_chars") and total else 0.0
     threads = int(job.get("threads") or 0)
     if threads > 0:
         torch.set_num_threads(threads)
@@ -107,7 +144,8 @@ def main(argv: list[str] | None = None) -> int:
     last_confirmed: float | None = None
     for target in sorted(job["targets"], key=lambda t: t["pos"]):
         t0 = time.time()
-        est, known_before, known_after = estimate(anchors, target["pos"])
+        est, known_before, known_after = estimate(
+            anchors, target["pos"], rate=observed_rate(anchors, fallback_rate), limit=total)
         half = half_window(est, known_before)
         result = {"id": target["id"], "estimate": round(est, 1), "status": "unconfirmed"}
         for attempt in range(2):
@@ -119,7 +157,8 @@ def main(argv: list[str] | None = None) -> int:
             words = align_text(emissions, stride, tokenizer, target["text"])
             ok, start, score, why = judge(words, lo, hi, min_score, floor=last_confirmed)
             result.update({"window": [round(lo, 1), round(hi, 1)], "score": round(score, 3),
-                           "landed": round(start, 1), "attempts": attempt + 1})
+                           "landed": round(start, 1), "attempts": attempt + 1,
+                           "extrapolated": target["pos"] > anchors[-1][0]})
             result["why"] = why
             if ok:
                 result.update({"status": "confirmed", "time": round(start, 2)})

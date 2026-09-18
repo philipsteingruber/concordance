@@ -350,7 +350,10 @@ def propose(cfg: Config, abs_client: AbsClient, query: str) -> int:
                 if any(book.chapters[f].start - 300 <= t < book.chapters[l].end + 300 for f, l in spans)]
     remembered = remembered_times(book)
     cached = {**remembered, **cached_times(cfg, book)}
-    anchors = [(0, 0.0), (book.positions[-1], book.duration)]
+    # Only measured points. The end of the audio is deliberately not an anchor:
+    # an ebook routinely carries matter the audiobook never reads, so the last
+    # character is not the last second. It stays a bound, applied in the probe.
+    anchors = [(0, 0.0)]
     anchors += [(book.pos(book.starts[k]), t) for k, t in cached.items()]
     anchors += entry_anchors(cfg, book)
     probe = [k for k in in_scope if k not in cached]
@@ -361,6 +364,7 @@ def propose(cfg: Config, abs_client: AbsClient, query: str) -> int:
     results: dict[int, dict] = {k: {"status": "cached", "time": cached[k]} for k in in_scope if k in cached}
     if probe:
         job = {"manifest": book.manifest, "anchors": sorted(anchors),
+               "total_chars": book.positions[-1],
                "min_score": max(cfg.min_align_score, CHAPTER_MIN_SCORE),
                "threads": int(os.environ.get("CONCORDANCE_ALIGNER_THREADS", "0") or 0),
                "targets": [{"id": k, "pos": book.pos(book.starts[k]), "text": opening_text(book, book.starts[k])}
