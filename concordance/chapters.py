@@ -227,20 +227,20 @@ def cached_times(cfg: Config, book: Book) -> dict[int, float]:
     """Start index -> time, for starts inside a fresh, trusted alignment cache entry."""
     out: dict[int, float] = {}
     for entry in _fresh_entries(cfg, book):
-        # Whether the entry aligned at all is a property of the entry. Asking
-        # instead for the mean score in a window around the looked-up time
-        # rejected correct answers at every item boundary: a chapter starting at
-        # offset 0 scores its one-sided opening window, and a heading the
-        # narrator doesn't read sinks it. Misery's "Part Two, Chapter 15" sat at
-        # spine 14 offset 0 with a true time in the cache and scored -8.99 there,
-        # so it was sent to the aligner, which then searched the wrong place.
-        overall = entry.overall_score()
-        if overall is None or overall < cfg.min_align_score:
-            continue
+        # The score is checked at the looked-up position, not across the entry.
+        # Briefly changed to an entry-wide mean on the theory that a one-sided
+        # window at an item's first word was rejecting good answers; measured, it
+        # admitted exactly one extra chapter start out of 55 and that one was
+        # wrong - it sat in the 150 s at the start of Misery's spine 14 where the
+        # text is crammed at four times narration speed. A position gate belongs
+        # at the position.
         spines = {item[0]: item[2] for item in entry.items}
         for k, start in enumerate(book.starts):
             if start.spine in spines and start.offset < spines[start.spine]:
-                out[k] = entry.time_for(start.spine, start.offset)[0]
+                seconds, _ = entry.time_for(start.spine, start.offset)
+                score = entry.mean_score(seconds)
+                if score is not None and score >= cfg.min_align_score:
+                    out[k] = seconds
     return out
 
 

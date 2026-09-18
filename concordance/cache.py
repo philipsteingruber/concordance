@@ -160,18 +160,13 @@ class Entry:
     def mean_score(self, around_seconds: float, window: float = 30.0) -> float | None:
         """Mean word score within ±window of a time: the confidence gate for a write.
 
-        Positional, so it is the right gate for "can this exact position be
-        trusted" and the wrong one for "did this entry align correctly": at the
-        first or last word the window is one-sided, and the opening words of a
-        chapter score badly often enough (an unspoken heading, a part
-        announcement) to sink the average. Use `overall_score` for the entry.
+        Positional on purpose. An entry can align well overall and still be
+        rubbish in one stretch - Misery's spine 14 opens with 150 s of text
+        crammed at four times narration speed - and a lookup lands at a
+        position, not at an average.
         """
         scores = [w[4] for w in self.words if abs(w[2] - around_seconds) <= window]
         return sum(scores) / len(scores) if scores else None
-
-    def overall_score(self) -> float | None:
-        """Mean word score across the whole entry: did this alignment match at all."""
-        return sum(w[4] for w in self.words) / len(self.words) if self.words else None
 
     def item_bounds(self) -> list[tuple[int, int, float, int, float]]:
         """Per spine item: (spine, first offset, its time, last offset, its time).

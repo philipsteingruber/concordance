@@ -33,11 +33,6 @@ from pathlib import Path
 
 MIN_HALF_WINDOW = 60.0
 MAX_HALF_WINDOW = 480.0
-# The estimate interpolates across the gap between the known points either side,
-# and that error is linear in the gap - worst case about 2% of it. Sizing from
-# the gap rather than from where in it the estimate falls, with room to spare,
-# because a window one second too narrow costs a whole retry.
-SPAN_FRACTION = 0.05
 EDGE_SECONDS = 3.0
 SCORED_WORDS = 12
 
@@ -54,9 +49,16 @@ def estimate(anchors: list[tuple[int, float]], pos: int) -> tuple[float, float, 
     return before[1] + fraction * (after[1] - before[1]), before[1], after[1]
 
 
-def half_window(known_before: float, known_after: float) -> float:
-    """Sized from the gap being interpolated across, not from where in it the estimate falls."""
-    return min(MAX_HALF_WINDOW, max(MIN_HALF_WINDOW, SPAN_FRACTION * (known_after - known_before)))
+def half_window(est: float, known_before: float) -> float:
+    """Wider the further the estimate is from the last known point.
+
+    Was briefly sized from the whole gap being interpolated across, to fix probes
+    that kept landing on a window edge. That turned out to be an untokenizable
+    first word rather than a narrow window - a controlled test put the same
+    passage at the same wrong place with the window at +-300 s and at +-960 s -
+    and the wider windows cost about fifteen minutes per chapter instead of two.
+    """
+    return min(MAX_HALF_WINDOW, max(MIN_HALF_WINDOW, 0.06 * (est - known_before) + 45.0))
 
 
 def judge(words: list[dict], lo: float, hi: float, min_score: float,
@@ -106,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     for target in sorted(job["targets"], key=lambda t: t["pos"]):
         t0 = time.time()
         est, known_before, known_after = estimate(anchors, target["pos"])
-        half = half_window(known_before, known_after if known_after > known_before else est)
+        half = half_window(est, known_before)
         result = {"id": target["id"], "estimate": round(est, 1), "status": "unconfirmed"}
         for attempt in range(2):
             lo = max(0.0, known_before, est - half)

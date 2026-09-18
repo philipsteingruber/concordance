@@ -7,7 +7,7 @@ from concordance import chapters as chapters_mod
 
 from concordance.absclient import Chapter
 from concordance.chapterdetect import ChapterStart, _label_parts, _numbered_runs, chapter_number, heading_blocks
-from concordance.chapterprobe import MIN_HALF_WINDOW, estimate, half_window, judge
+from concordance.chapterprobe import estimate, half_window, judge
 from concordance.chapters import build_chapters, regions
 from concordance.xpointer import parse_document
 
@@ -136,46 +136,40 @@ class RenumberCacheTest(unittest.TestCase):
 
 
 class CacheLookupTest(unittest.TestCase):
-    """Regression tests for a propose run that re-aligned audio already in the cache.
+    """The cache gate is checked at the looked-up position, not across the entry.
 
-    The lookup gated on the mean word score in a window around the looked-up
-    time. That window is one-sided at an entry's first word, and a chapter
-    opening the narrator doesn't read scores terribly, so a start at offset 0
-    was rejected while the entry it came from had aligned perfectly well.
+    An entry can align well on average and still be rubbish in one stretch, and a
+    chapter start that lands in that stretch must not be trusted. Measured on a
+    real book, moving this gate to an entry-wide mean admitted one extra start
+    out of 55 and that one was wrong.
     """
 
     def entry(self, opening_score: float):
         from concordance.cache import Entry, FileFingerprint, GroupKey
         fp = FileFingerprint("x", 1, 2)
-        words = [(i, i + 4, 100.0 + i, 100.5 + i, opening_score if i < 20 else -0.1)
+        words = [(i, i + 4, 100.0 + i, 100.5 + i, opening_score if i < 200 else -0.1)
                  for i in range(0, 400, 4)]
         return Entry(key=GroupKey(561, "item", "kepub", 14, 14, 6, 7), items=[(14, 0, 400)],
                      audio_start=100.0, audio_end=200.0, book_file=fp, audio_file=fp,
                      aligner={}, words=words)
 
-    def book(self):
-        return types.SimpleNamespace(
+    def resolve(self, entry, offset):
+        cfg = types.SimpleNamespace(abs_audio_root=None, min_align_score=-1.0)
+        book = types.SimpleNamespace(
             calibre_id=561, item_id="item", fmt="kepub", book_file=Path("x"),
             manifest=[("a.m4b", 200.0)], positions={14: 1000, -1: 1400},
-            starts=[ChapterStart(14, 0, "Chapter 15", "heading")])
-
-    def resolve(self, entry):
-        cfg = types.SimpleNamespace(abs_audio_root=None, min_align_score=-1.0)
+            starts=[ChapterStart(14, offset, "Chapter 15", "heading")])
         with unittest.mock.patch("concordance.chapters._fresh_entries", return_value=[entry]):
-            return chapters_mod.cached_times(cfg, self.book())
+            return chapters_mod.cached_times(cfg, book)
 
-    def test_resolves_a_chapter_starting_at_the_first_word_of_an_entry(self):
-        bad_opening = self.entry(opening_score=-9.0)
-        self.assertIn(0, self.resolve(bad_opening))
+    def test_refuses_a_start_inside_a_badly_aligned_stretch(self):
+        self.assertEqual(self.resolve(self.entry(opening_score=-9.0), offset=0), {})
 
-    def test_still_refuses_an_entry_that_did_not_align(self):
-        with unittest.mock.patch.object(chapters_mod, "_fresh_entries"):
-            self.assertEqual(self.resolve(self.entry(opening_score=-40.0)), {})
+    def test_accepts_a_start_in_a_well_aligned_stretch_of_the_same_entry(self):
+        self.assertIn(0, self.resolve(self.entry(opening_score=-9.0), offset=380))
 
-    def test_scores_the_whole_entry_rather_than_the_looked_up_position(self):
-        e = self.entry(opening_score=-9.0)
-        self.assertLess(e.mean_score(e.words[0][2]), -1.0)
-        self.assertGreater(e.overall_score(), -1.0)
+    def test_accepts_a_start_when_the_whole_entry_aligned_well(self):
+        self.assertIn(0, self.resolve(self.entry(opening_score=-0.1), offset=0))
 
 
 class EntryAnchorTest(unittest.TestCase):
@@ -254,11 +248,8 @@ class ProbeTest(unittest.TestCase):
     def test_interpolates_between_the_nearest_known_points(self):
         self.assertEqual(estimate([(0, 0.0), (1000, 500.0), (2000, 600.0)], 1500), (550.0, 500.0, 600.0))
 
-    def test_widens_the_window_for_a_longer_gap_between_known_points(self):
-        self.assertGreater(half_window(0.0, 20_000.0), half_window(0.0, 2_000.0))
-
-    def test_sizes_the_window_from_the_gap_not_from_the_estimate_within_it(self):
-        self.assertGreater(half_window(0.0, 10_000.0), MIN_HALF_WINDOW)
+    def test_widens_the_window_with_distance_from_the_last_known_point(self):
+        self.assertGreater(half_window(3000.0, 0.0), half_window(300.0, 0.0))
 
     def test_accepts_a_well_scored_start_away_from_the_window_edges(self):
         words = [{"start": 40.0, "score": -0.1}] * 5
