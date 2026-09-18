@@ -99,6 +99,18 @@ Load it into your shell for manual runs:
 set -a; . ./.env; set +a
 ```
 
+Or don't, and let `scripts/run.sh` load it for you. It takes a module name and
+passes everything after it straight through:
+
+```bash
+scripts/run.sh chapters propose 561
+scripts/run.sh orchestrate --planned-only
+```
+
+Worth preferring when something other than you might read the output — an
+automation, a shared terminal, a recorded session — since the password never
+has to be typed or echoed to get a command to run.
+
 ### First look (read-only)
 
 ```bash
