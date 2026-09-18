@@ -16,8 +16,21 @@ It's developed and used against the
 [Calibre-Web NextGen](https://github.com/new-usemame/Calibre-Web-NextGen) fork
 of CWA. Upstream CWA may work but hasn't been tested.
 
-**Status: alpha.** It runs daily for one library. Expect rough edges, and read
-[Enabling writes](#enabling-writes) before letting it touch real progress.
+**Status: early alpha, and younger than it looks.** One person's library, one
+Kobo, one Audiobookshelf instance. Writes to real books were switched on on
+2026-09-17, for two books, and there have been two unattended nightly alignment
+runs. Everything below is implemented and tested, but "tested" here means
+against one library's quirks.
+
+Bugs found in the first two days give the flavour: the same audiobook position
+written nine times in a row because a rounded value read as "still ahead"; every
+chapter probe on one book silently placed at the start of its search window
+because a numeric chapter heading tokenizes to nothing; one marginally-scored
+chapter acceptance dragging thirty later chapters out of place. All three are
+fixed, and all three had passing unit tests around them beforehand.
+
+Read [Enabling writes](#enabling-writes) before letting it touch real progress,
+and enable books one at a time.
 
 ## How it works
 
@@ -202,8 +215,7 @@ times worse than a real 10-minute chapter.
 
 `concordance-chapters` rebuilds those slices from the ebook's real chapters, one
 book at a time. Doing it once permanently improves every later sync of that
-book, and it costs no extra alignment — chapter starts already confirmed are
-reused:
+book, and it reuses chapter times the nightly alignment already found:
 
 ```bash
 concordance-chapters check 561      # instant: ABS chapters vs real chapters, per ABS chapter
@@ -213,12 +225,24 @@ concordance-chapters restore 561    # put the latest backup back
 ```
 
 Without `pip install`, run `python3 -m concordance.chapters <action> <book>` from
-the repository. `check` costs nothing; `propose` is the slow step, about two
-minutes of CPU per chapter it has to locate.
+the repository. `check` costs nothing; `propose` is the slow step — measured at
+36 seconds to 7 minutes of CPU per chapter it has to locate, median about two
+and a half minutes. A chapter close behind a known one is quick; one the
+estimate has to reach a long way for is not.
 
 A book is only touched when it has at least 1.5 times as many real chapters as
 ABS chapters, and only the ABS chapters that contain two or more real chapters
-are rebuilt, together with any short run of slices between them.
+are rebuilt, together with any short run of slices between them. Detected starts
+less than `CONCORDANCE_MIN_CHAPTER_SECONDS` apart are dropped, because a mark a
+few seconds after the last one is not something you can navigate by.
+
+**This is the least proven part of Concordance.** On the one book it has been
+run against at scale — 107 chapters, a 12-hour recording, a novel that quotes
+another novel in a different typeface — roughly half the chapters it had to
+locate were confirmed, and the rest were refused rather than guessed. It is
+worth running `check`, then `propose`, then reading the proposal before `apply`,
+which is why they are three separate commands. `restore` puts the old chapter
+list back if a proposal turns out wrong.
 
 - **Finding chapters in the ebook:** table-of-contents entries that point inside
   files, numbered headings that count upwards (it tells a book's chapters apart
@@ -227,9 +251,16 @@ are rebuilt, together with any short run of slices between them.
 - **Finding them in the audio:** times come from the alignment cache where a
   chapter is already aligned. Otherwise each chapter's opening words are aligned
   in a window around an estimate, one chapter after another, each estimate
-  anchored on the last chapter found. It takes about two minutes of CPU per
-  chapter; confirmed times are remembered, so a second `propose` only looks for
-  what's missing. Chapters that can't be confirmed are left out, not guessed.
+  anchored on the last chapter found. Confirmed times are remembered, so a second
+  `propose` only looks for what's missing. Chapters that can't be confirmed are
+  left out, not guessed.
+- **Why a located chapter is held to a stricter score than a write
+  (`CONCORDANCE_CHAPTER_MIN_SCORE`):** each confirmation becomes an anchor for
+  every estimate after it, so accepting a wrong one is far more expensive than
+  refusing a right one. Measured on one book, correct confirmations scored −0.01
+  to −0.23 and the wrong ones −0.92, which cleared the −1.0 write gate and put
+  thirty later chapters out of reach. A confirmed chapter must also be later than
+  the one before it, which no amount of scoring can substitute for.
 - **Keeping alignments:** a cache entry's name carries the ABS chapters it covered,
   so `apply` renames affected entries to the new numbering. Without that, the next
   nightly run would align the same audio again.
@@ -310,6 +341,15 @@ research scripts behind the numbers in `docs/`.
   reports before allowlisting them.
 - One CWA user and one ABS user per configuration.
 - Alignment runs on the CPU only, which is slow for long chapters.
+- An alignment can be good overall and wrong in one stretch. One measured entry
+  was excellent for 95% of its length and degenerate for the first 440 seconds,
+  where the audiobook's chapter began with the previous section's narration.
+  Positions in a stretch like that are refused rather than trusted, so coverage
+  is patchier in practice than "this book is aligned" suggests.
+- `concordance-chapters` has been applied to exactly one book, and trialled on
+  one more. Treat a proposal as something to read, not to rubber-stamp.
+- It has never run against a library other than the author's. Expect the first
+  thing a different library does to be something this hasn't seen.
 
 ## Licence
 
