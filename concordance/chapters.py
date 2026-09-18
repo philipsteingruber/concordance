@@ -280,13 +280,26 @@ def entry_anchors(cfg: Config, book: Book) -> list[tuple[int, float]]:
     estimate for the chapter at the start of spine 14 392 seconds early - far
     enough that the search window never contained the answer. Pinning both ends
     of each aligned item keeps every interpolation inside continuous narration.
+
+    An end is offered as an anchor only where the alignment there is trustworthy,
+    by the same positional score that decides whether a time may be read out of
+    the cache at all. An entry can align well overall and badly in one stretch,
+    and its ends are exactly where that happens: Misery's spine 14 opens with 150
+    seconds of text crammed at four times narration speed, and its first character
+    scores -8.99. `cached_times` refuses to report that position, so offering the
+    same position as a measured anchor was the tool disagreeing with itself, and
+    it sent the probe hunting for the chapter that starts there in the wrong place.
     """
+    floor = max(cfg.min_align_score, CHAPTER_MIN_SCORE)
     out: list[tuple[int, float]] = []
     for entry in _fresh_entries(cfg, book):
         for spine, first, first_t, last, last_t in entry.item_bounds():
-            if spine in book.positions:
-                out.append((book.positions[spine] + first, first_t))
-                out.append((book.positions[spine] + last, last_t))
+            if spine not in book.positions:
+                continue
+            for offset, seconds in ((first, first_t), (last, last_t)):
+                score = entry.mean_score(seconds)
+                if score is not None and score >= floor:
+                    out.append((book.positions[spine] + offset, seconds))
     return out
 
 

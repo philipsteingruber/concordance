@@ -229,12 +229,13 @@ class EntryAnchorTest(unittest.TestCase):
     estimate ~390 s early, outside any window the probe would search.
     """
 
-    def anchors(self):
+    def anchors(self, opening_score=-0.1):
         from concordance.cache import Entry, FileFingerprint, GroupKey
         fp = FileFingerprint("x", 1, 2)
         # Item 14 is narrated from 900 s; item 13 ends at 500 s. The 400 s between
         # them is announcement, and holds no characters.
-        words = [(i, i + 4, 900.0 + i, 900.5 + i, -0.1) for i in range(0, 400, 4)]
+        words = [(i, i + 4, 900.0 + i, 900.5 + i, opening_score if i < 200 else -0.1)
+                 for i in range(0, 400, 4)]
         entry = Entry(key=GroupKey(561, "item", "kepub", 14, 14, 6, 7), items=[(14, 0, 400)],
                       audio_start=900.0, audio_end=1300.0, book_file=fp, audio_file=fp,
                       aligner={}, words=words)
@@ -247,6 +248,15 @@ class EntryAnchorTest(unittest.TestCase):
 
     def test_anchors_both_ends_of_an_aligned_item(self):
         self.assertEqual(len(self.anchors()), 2)
+
+    def test_refuses_an_end_whose_alignment_is_not_trustworthy(self):
+        """cached_times won't report that position, so it must not be an anchor either."""
+        kept = self.anchors(opening_score=-9.0)
+        self.assertNotIn(1000, [pos for pos, _ in kept])
+
+    def test_keeps_the_sound_end_of_a_partly_bad_item(self):
+        """Half an entry being wrong is no reason to throw away the half that isn't."""
+        self.assertEqual(len(self.anchors(opening_score=-9.0)), 1)
 
     def test_pins_the_items_first_character_to_when_narration_starts(self):
         self.assertIn((1000, 900.0), self.anchors())
