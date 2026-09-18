@@ -166,6 +166,54 @@ def sliced_emissions(model, waveform, slice_seconds: int = 0, batch_size: int = 
     return torch.cat(parts, dim=0), stride
 
 
+STAR = "<star>"
+
+
+def drop_untokenizable(tokens: list[str], texts: list[str]) -> tuple[list[str], list[str], list[bool]]:
+    """Remove words the romanizer produced no tokens for. Returns the kept mask too.
+
+    A bare numeral romanizes to an empty string: "17" yields "". `get_alignments`
+    drops it when building the token indices, but `get_spans` still walks `tokens`
+    positionally, so the empty word is handed back a span starting at frame 0 and
+    the alignment of everything after it is read off by one.
+
+    That is not cosmetic. A chapter opening usually begins with the chapter's
+    number, so a caller reading the first word's time is told the chapter starts
+    at the beginning of whatever audio was searched. A book that spells its
+    chapters out ("One", "Two") aligns perfectly and one that uses digits fails
+    completely - exactly the split between The Burn Palace and Misery.
+    """
+    kept = [bool(tok.strip()) for tok in tokens]
+    return ([t for t, k in zip(tokens, kept) if k],
+            [t for t, k in zip(texts, kept) if k],
+            kept)
+
+
+def restore_untokenizable(results: list[dict], texts: list[str], kept: list[bool]) -> list[dict]:
+    """Put the dropped words back, so the output stays one entry per source word.
+
+    `build_entry` pairs the aligner's output with the group text word by word and
+    refuses a mismatch, which is worth keeping: it is the check that would catch
+    the aligner and the text drifting apart. A dropped word is restored with a
+    zero-length span where the next aligned word begins, and that word's score,
+    so it neither invents a duration nor moves the mean.
+    """
+    words = [t for t, star in zip(texts, (t == STAR for t in texts)) if not star]
+    flags = [k for k, t in zip(kept, texts) if t != STAR]
+    out, i = [], 0
+    for text, keep in zip(words, flags):
+        if keep:
+            out.append(results[i])
+            i += 1
+            continue
+        after = results[i] if i < len(results) else None
+        before = out[-1] if out else None
+        at = after["start"] if after else (before["end"] if before else 0.0)
+        score = (after or before or {"score": 0.0})["score"]
+        out.append({"start": at, "end": at, "text": text, "score": score})
+    return out
+
+
 def align_text(emissions, stride, tokenizer, text: str) -> list[dict]:
     """Word timings for `text` against emissions, with <star> at the edges only.
 
@@ -177,9 +225,11 @@ def align_text(emissions, stride, tokenizer, text: str) -> list[dict]:
 
     tokens_starred, text_starred = preprocess_text(text, romanize=True, language="eng",
                                                    split_size="word", star_frequency="edges")
-    segments, scores, blank = get_alignments(emissions, tokens_starred, tokenizer)
-    spans = get_spans(tokens_starred, segments, blank)
-    return postprocess_results(text_starred, spans, stride, scores)
+    tokens, texts, kept = drop_untokenizable(tokens_starred, text_starred)
+    segments, scores, blank = get_alignments(emissions, tokens, tokenizer)
+    spans = get_spans(tokens, segments, blank)
+    results = postprocess_results(texts, spans, stride, scores)
+    return restore_untokenizable(results, text_starred, kept)
 
 
 def align_chunked(model, tokenizer, manifest, text: str, start: float, end: float,

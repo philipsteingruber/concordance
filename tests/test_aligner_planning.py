@@ -1,6 +1,7 @@
 import unittest
 
-from concordance.aligner import alnum_count, estimate_peak_mb, next_piece, viterbi_mb
+from concordance.aligner import (alnum_count, drop_untokenizable, estimate_peak_mb,
+                                 next_piece, restore_untokenizable, viterbi_mb)
 
 
 class MemoryModelTest(unittest.TestCase):
@@ -39,6 +40,59 @@ class NextPieceTest(unittest.TestCase):
     def test_absorbs_a_leftover_shorter_than_a_quarter_of_the_target(self):
         # A 20 s target stops after the fourth word; the 4 s last word is under 5 s, so it joins.
         self.assertEqual(next_piece(self.spans, 0, 1.0, 20.0), 5)
+
+
+class UntokenizableWordTest(unittest.TestCase):
+    """A bare numeral romanizes to nothing, and that used to poison the alignment.
+
+    `get_spans` walks the token list positionally, so an empty token is handed a
+    span starting at frame 0. A chapter opening usually begins with its number,
+    so the first word came back at the start of whatever audio was searched -
+    which read as "the chapter starts here" no matter where it really was.
+    """
+
+    TOKENS = ["<star>", "", "a n n i e", "l a r d e r", "<star>"]
+    TEXTS = ["<star>", "17", "Annie's", "larder", "<star>"]
+    ALIGNED = [{"start": 303.2, "end": 303.6, "text": "Annie's", "score": -0.09},
+               {"start": 303.6, "end": 304.1, "text": "larder", "score": -0.05}]
+
+    def test_removes_a_word_the_romanizer_emptied(self):
+        tokens, _, _ = drop_untokenizable(self.TOKENS, self.TEXTS)
+        self.assertNotIn("", tokens)
+
+    def test_keeps_the_star_tokens(self):
+        tokens, _, _ = drop_untokenizable(self.TOKENS, self.TEXTS)
+        self.assertEqual(tokens.count("<star>"), 2)
+
+    def test_returns_one_entry_per_source_word(self):
+        """build_entry pairs output with the text word by word and refuses a mismatch."""
+        _, _, kept = drop_untokenizable(self.TOKENS, self.TEXTS)
+        out = restore_untokenizable(self.ALIGNED, self.TEXTS, kept)
+        self.assertEqual([w["text"] for w in out], ["17", "Annie's", "larder"])
+
+    def test_places_a_restored_word_where_narration_actually_begins(self):
+        _, _, kept = drop_untokenizable(self.TOKENS, self.TEXTS)
+        out = restore_untokenizable(self.ALIGNED, self.TEXTS, kept)
+        self.assertEqual(out[0]["start"], 303.2)
+
+    def test_gives_a_restored_word_no_duration_of_its_own(self):
+        _, _, kept = drop_untokenizable(self.TOKENS, self.TEXTS)
+        out = restore_untokenizable(self.ALIGNED, self.TEXTS, kept)
+        self.assertEqual(out[0]["start"], out[0]["end"])
+
+    def test_leaves_the_mean_score_undisturbed(self):
+        """A restored word borrows its neighbour's score rather than inventing one."""
+        _, _, kept = drop_untokenizable(self.TOKENS, self.TEXTS)
+        out = restore_untokenizable(self.ALIGNED, self.TEXTS, kept)
+        self.assertEqual(out[0]["score"], self.ALIGNED[0]["score"])
+
+    def test_restores_a_trailing_word_after_the_last_aligned_one(self):
+        tokens = ["<star>", "e n d", "", "<star>"]
+        texts = ["<star>", "end", "42", "<star>"]
+        aligned = [{"start": 10.0, "end": 11.0, "text": "end", "score": -0.1}]
+        _, _, kept = drop_untokenizable(tokens, texts)
+        out = restore_untokenizable(aligned, texts, kept)
+        self.assertEqual((out[-1]["text"], out[-1]["start"]), ("42", 11.0))
 
 
 if __name__ == "__main__":
