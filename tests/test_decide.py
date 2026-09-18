@@ -4,7 +4,7 @@ from concordance.absclient import AbsProgress, Chapter
 from concordance.anchor import build_alignment
 from concordance.calibre import SpineItem
 from concordance.cwa import CwaProgress
-from concordance.decide import SAME_CHAPTER_DEADBAND_SECONDS, decide
+from concordance.decide import SAME_CHAPTER_DEADBAND_SECONDS, _already_further, decide
 
 # Three equal chapters of 1000 s, three equal spine items: a clean 1:1 book.
 SPINE = [SpineItem(index=i, href=f"c{i}.xhtml", chars=20_000) for i in (1, 2, 3)]
@@ -103,6 +103,49 @@ class FinishedTest(unittest.TestCase):
     def test_reports_in_sync_when_both_sides_are_finished(self):
         d = decide(ebook(3, 100.0), audio(DURATION, finished=True), ALIGNMENT, 150, DURATION)
         self.assertEqual(d.direction, "in_sync")
+
+
+class RepeatedWriteTest(unittest.TestCase):
+    """A position Concordance already wrote must not be written again next sync.
+
+    Neither side stores back exactly what was sent - ABS rounds seconds to one
+    decimal - so comparing a freshly computed position against the stored one
+    for strict inequality reads as "still ahead" forever.
+    """
+
+    def test_stops_rewriting_an_audio_position_after_abs_rounded_it(self):
+        stored = decide(ebook(3, 68.0), audio(1500.0), ALIGNMENT, rewind_seconds=150,
+                        book_duration=DURATION, item_fraction=0.12341)
+        self.assertEqual(stored.direction, "to_abs")
+        again = decide(ebook(3, 68.0), audio(round(stored.abs_seconds, 1)), ALIGNMENT,
+                       rewind_seconds=150, book_duration=DURATION, item_fraction=0.12341)
+        self.assertEqual(again.direction, "in_sync")
+
+    def test_still_writes_when_the_ebook_has_moved_a_real_distance_ahead(self):
+        d = decide(ebook(3, 68.0), audio(1973.4), ALIGNMENT, rewind_seconds=150,
+                   book_duration=DURATION, item_fraction=0.3)
+        self.assertEqual(d.direction, "to_abs")
+
+
+class AlreadyFurtherTest(unittest.TestCase):
+    """The ebook-side guard behind the CWA floor.
+
+    A CWA percentage is written CWA_PERCENT_MARGIN points below the position it
+    points at, so the percentage alone can never show that the ebook reached the
+    point Concordance sent it to. The resolved spine and offset can.
+    """
+
+    def test_counts_a_later_spine_item_as_already_further(self):
+        self.assertTrue(_already_further(2, 0.9, ebook_spine=3, ebook_fraction=0.0))
+
+    def test_counts_the_same_offset_in_the_same_spine_item_as_already_further(self):
+        self.assertTrue(_already_further(3, 0.25, ebook_spine=3, ebook_fraction=0.25))
+
+    def test_does_not_count_an_earlier_offset_in_the_same_spine_item(self):
+        self.assertFalse(_already_further(3, 0.6, ebook_spine=3, ebook_fraction=0.25))
+
+    def test_decides_nothing_without_a_resolved_ebook_offset(self):
+        self.assertFalse(_already_further(3, 0.25, ebook_spine=3, ebook_fraction=None))
 
 
 if __name__ == "__main__":

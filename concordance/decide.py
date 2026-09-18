@@ -28,6 +28,7 @@ from dataclasses import dataclass
 
 from .absclient import AbsProgress
 from .anchor import Alignment
+from .config import CWA_PERCENT_MARGIN
 from .cwa import CwaProgress
 from .translate import (
     audio_item_fraction,
@@ -46,6 +47,13 @@ SAME_CHAPTER_DEADBAND_SECONDS = 120.0
 # With a forced alignment the positions are accurate to seconds, so a much
 # tighter deadband avoids writing trivially different positions back and forth.
 ALIGNED_DEADBAND_SECONDS = 20.0
+# A floor compares a freshly computed position against one the other side stored
+# earlier, and the stored value is never byte-identical to what was sent: ABS
+# rounds times to 0.1 s, and a CWA percentage is written CWA_PERCENT_MARGIN points
+# low on purpose. Comparing exactly let a 0.04 s difference read as "still ahead",
+# so the same position was rewritten every sync until the tier changed hours later.
+FLOOR_TOLERANCE_SECONDS = 2.0
+FLOOR_TOLERANCE_PERCENT = CWA_PERCENT_MARGIN
 
 
 @dataclass(frozen=True)
@@ -104,6 +112,11 @@ def decide(
         return _to_cwa(listening, alignment, "only the audiobook has progress",
                        aligned=aligned_audio_fraction)
 
+    # Where the ebook sits, for the "has the ebook already got there" check on
+    # writes toward CWA. `item_fraction` is None without a resolved XPointer.
+    here = ebook_point(cwa, alignment)
+    ebook_spine = here.spine_index if here is not None else None
+
     # Both sides moved and both are aligned: compare exact audio times directly.
     if aligned_ebook_time is not None:
         gap = aligned_ebook_time - listening.current_time
@@ -114,10 +127,11 @@ def decide(
             return _to_abs(cwa, alignment, rewind_seconds, book_duration, "ebook is ahead (aligned)",
                            floor=listening.current_time, aligned_time=aligned_ebook_time)
         return _to_cwa(listening, alignment, "audiobook is ahead (aligned)", floor=cwa.percentage,
-                       aligned=aligned_audio_fraction)
+                       aligned=aligned_audio_fraction, ebook_spine=ebook_spine,
+                       ebook_fraction=item_fraction)
 
     # Both sides have moved. Chapter first, when both can be anchored.
-    ebook_at = ebook_point(cwa, alignment)
+    ebook_at = here
     audio_at = chapter_point_at(listening.current_time, alignment)
     if ebook_at is not None and audio_at is not None:
         order = {p.spine_index: i for i, p in enumerate(alignment.points)}
@@ -136,13 +150,15 @@ def decide(
                                "ebook is ahead within the chapter", floor=listening.current_time,
                                item_fraction=item_fraction)
             return _to_cwa(listening, alignment, "audiobook is ahead within the chapter",
-                           floor=cwa.percentage)
+                           floor=cwa.percentage, ebook_spine=ebook_spine,
+                           ebook_fraction=item_fraction)
         if e > a:
             return _to_abs(cwa, alignment, rewind_seconds, book_duration,
                            "ebook is chapters ahead", floor=listening.current_time,
                            item_fraction=item_fraction)
         return _to_cwa(listening, alignment, "audiobook is chapters ahead",
-                       floor=cwa.percentage)
+                       floor=cwa.percentage, ebook_spine=ebook_spine,
+                       ebook_fraction=item_fraction)
 
     # Otherwise compare in percentage space.
     audio_pct, _, _ = audio_to_ebook(listening.current_time, alignment)
@@ -152,7 +168,8 @@ def decide(
     if cwa.percentage > audio_pct:
         return _to_abs(cwa, alignment, rewind_seconds, book_duration,
                        "ebook is ahead", floor=listening.current_time)
-    return _to_cwa(listening, alignment, "audiobook is ahead", floor=cwa.percentage)
+    return _to_cwa(listening, alignment, "audiobook is ahead", floor=cwa.percentage,
+                   ebook_spine=ebook_spine, ebook_fraction=item_fraction)
 
 
 def _to_abs(cwa: CwaProgress, alignment: Alignment, rewind: int, duration: float,
@@ -161,7 +178,7 @@ def _to_abs(cwa: CwaProgress, alignment: Alignment, rewind: int, duration: float
     if aligned_time is not None:
         raw = max(0.0, min(aligned_time, duration or aligned_time))
         seconds = max(0.0, raw - rewind)
-        if floor is not None and seconds <= floor:
+        if floor is not None and seconds <= floor + FLOOR_TOLERANCE_SECONDS:
             return Decision("in_sync", f"{reason}, but the rewound position is not past the audiobook's",
                             tier="aligned")
         return Decision("to_abs", reason, tier="aligned", abs_seconds=seconds, abs_raw_seconds=raw)
@@ -169,31 +186,50 @@ def _to_abs(cwa: CwaProgress, alignment: Alignment, rewind: int, duration: float
     if t.tier == "none":
         return Decision("none", t.note or "no translatable ebook position")
     # The rewind must never drag the audiobook backwards past where it already is.
-    if floor is not None and t.seconds <= floor:
+    if floor is not None and t.seconds <= floor + FLOOR_TOLERANCE_SECONDS:
         return Decision("in_sync", f"{reason}, but the rewound position is not past the audiobook's",
                         tier=t.tier)
     return Decision("to_abs", reason, tier=t.tier,
                     abs_seconds=t.seconds, abs_raw_seconds=t.raw_seconds)
 
 
+def _already_further(spine: int, fraction: float, ebook_spine: int | None,
+                     ebook_fraction: float | None) -> bool:
+    """Whether the ebook already sits at or past (spine, fraction).
+
+    Compares the resolved position rather than the percentage: Concordance writes
+    CWA percentages `CWA_PERCENT_MARGIN` points low (writer.py), so a percentage
+    floor can never match a position Concordance itself wrote, and the same write
+    would repeat every sync.
+    """
+    if ebook_spine is None or ebook_fraction is None:
+        return False
+    if ebook_spine != spine:
+        return ebook_spine > spine
+    return fraction <= ebook_fraction + 0.001
+
+
 def _to_cwa(listening: AbsProgress, alignment: Alignment, reason: str,
-            floor: float | None = None, aligned: tuple[int, float] | None = None) -> Decision:
+            floor: float | None = None, aligned: tuple[int, float] | None = None,
+            ebook_spine: int | None = None, ebook_fraction: float | None = None) -> Decision:
     if aligned is not None:
         spine, fraction = aligned
         point = next((p for p in alignment.points if p.spine_index == spine), None)
         if point is not None and alignment.total_chars > 0:
             pct = 100.0 * (point.text_start + fraction * point.text_chars) / alignment.total_chars
-            if floor is not None and pct <= floor:
-                return Decision("in_sync", f"{reason}, but the ebook is already further by percentage",
+            if _already_further(spine, fraction, ebook_spine, ebook_fraction) or (
+                    floor is not None and pct <= floor + FLOOR_TOLERANCE_PERCENT):
+                return Decision("in_sync", f"{reason}, but the ebook is already at or past that point",
                                 tier="aligned")
             return Decision("to_cwa", reason, tier="aligned", cwa_percentage=pct,
                             cwa_spine_index=spine, cwa_item_fraction=fraction)
     pct, spine, tier = audio_to_ebook(listening.current_time, alignment)
     if tier == "none":
         return Decision("none", "no translatable audiobook position")
-    if floor is not None and pct <= floor:
-        return Decision("in_sync", f"{reason}, but the ebook is already further by percentage",
-                        tier=tier)
     located = audio_item_fraction(listening.current_time, alignment)
+    if (located is not None and _already_further(located[0], located[1], ebook_spine, ebook_fraction)) or (
+            floor is not None and pct <= floor + FLOOR_TOLERANCE_PERCENT):
+        return Decision("in_sync", f"{reason}, but the ebook is already at or past that point",
+                        tier=tier)
     return Decision("to_cwa", reason, tier=tier, cwa_percentage=pct, cwa_spine_index=spine,
                     cwa_item_fraction=located[1] if located else None)

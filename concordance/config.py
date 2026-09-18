@@ -10,6 +10,14 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+# Percentage points subtracted from the CWA percentage Concordance writes. KOSync
+# keeps the higher percentage across devices, and KOReader's own percentage
+# (page-layout based) runs up to ~1 point below ours for the same spot. Writing
+# ours as-is made CWA reject the Kobo's next genuine pushes until the reader
+# passed the gap (found on a real device). The jump itself uses the XPointer, so
+# a lower percentage only changes the number in KOReader's prompt.
+CWA_PERCENT_MARGIN = float(os.environ.get("CONCORDANCE_CWA_PERCENT_MARGIN", "2.0"))
+
 
 class ConfigError(RuntimeError):
     """Raised when required configuration is missing or unusable."""
