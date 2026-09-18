@@ -402,11 +402,30 @@ def load_documents(book_file: Path) -> dict[int, Document]:
 
 
 def book_positions(docs: dict[int, Document]) -> dict[int, int]:
-    """Whole-book character position of each content item's start (content items only)."""
+    """Whole-book character position of each item's start.
+
+    Counts every item between the first and last substantial one, however short,
+    and drops only the leading and trailing runs. These positions are what times
+    get interpolated across, so what matters is whether the narrator reads the
+    text, not whether it is long enough to hold a chapter.
+
+    A part divider is short and narrated. Misery's "PART FOUR GODDESS" and its
+    epigraph is 880 characters and takes about 94 seconds to read, and leaving it
+    out of the map placed the whole of Part Four some 160 seconds earlier than it
+    is - outside even a doubled search window, so none of it could be found.
+    Front and back matter are the opposite case, short *and* usually unread, and
+    they sit at the ends where dropping them costs nothing in between.
+    """
+    order = sorted(docs)
+    substantial = [i for i in order if len(docs[i].text) >= MIN_CONTENT_CHARS]
+    if not substantial:
+        return {-1: 0}
+    first, last = substantial[0], substantial[-1]
     positions, cursor = {}, 0
-    for index in sorted(docs):
-        if len(docs[index].text) >= MIN_CONTENT_CHARS:
-            positions[index] = cursor
-            cursor += len(docs[index].text) + 1
+    for index in order:
+        if not (first <= index <= last and docs[index].text.strip()):
+            continue
+        positions[index] = cursor
+        cursor += len(docs[index].text) + 1
     positions[-1] = cursor          # total
     return positions

@@ -6,7 +6,8 @@ from pathlib import Path
 from concordance import chapters as chapters_mod
 
 from concordance.absclient import Chapter
-from concordance.chapterdetect import ChapterStart, _label_parts, _numbered_runs, chapter_number, heading_blocks
+from concordance.chapterdetect import (ChapterStart, _label_parts, _numbered_runs, book_positions,
+                                       chapter_number, heading_blocks)
 from concordance.chapterprobe import estimate, half_window, judge, observed_rate
 from concordance.chapters import build_chapters, regions
 from concordance.xpointer import parse_document
@@ -245,6 +246,40 @@ class EntryAnchorTest(unittest.TestCase):
         without = sorted([(600, 100.0), (1400, 1400.0)])
         self.assertAlmostEqual(estimate(with_bounds, 1000)[0], 900.0)
         self.assertGreater(900.0 - estimate(without, 1000)[0], 100.0)
+
+
+class BookPositionTest(unittest.TestCase):
+    """Short items between the content ones are narrated, and must be counted.
+
+    A part divider is a few hundred characters and about a minute and a half of
+    narration. Leaving Misery's "PART FOUR GODDESS" epigraph out of the map put
+    all of Part Four ~160 s early, past the reach of a doubled search window.
+    """
+
+    def docs(self, *sizes):
+        from concordance.xpointer import parse_document
+        return {i: parse_document(f"<html><body><p>{'x' * n}</p></body></html>".encode())
+                for i, n in enumerate(sizes, start=1)}
+
+    def test_counts_a_short_item_between_two_substantial_ones(self):
+        pos = chapters_mod.book_positions(self.docs(5000, 800, 5000))
+        self.assertIn(2, pos)
+
+    def test_leaves_a_gap_the_size_of_that_item_before_the_next(self):
+        pos = chapters_mod.book_positions(self.docs(5000, 800, 5000))
+        self.assertGreater(pos[3] - pos[1], 5000 + 800)
+
+    def test_drops_short_items_before_the_first_substantial_one(self):
+        """Front matter is short and usually unread, and sits where dropping it is free."""
+        pos = chapters_mod.book_positions(self.docs(300, 5000, 5000))
+        self.assertNotIn(1, pos)
+
+    def test_drops_short_items_after_the_last_substantial_one(self):
+        pos = chapters_mod.book_positions(self.docs(5000, 5000, 300))
+        self.assertNotIn(3, pos)
+
+    def test_reports_a_total_even_with_nothing_substantial(self):
+        self.assertEqual(chapters_mod.book_positions(self.docs(10, 20)), {-1: 0})
 
 
 class DropCrowdedTest(unittest.TestCase):
