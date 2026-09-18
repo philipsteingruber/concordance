@@ -135,6 +135,87 @@ class RenumberCacheTest(unittest.TestCase):
         self.assertTrue((Path(self.dir.name) / "561/kepub-sp10-10-ch1-3.json.gz").exists())
 
 
+class CacheLookupTest(unittest.TestCase):
+    """Regression tests for a propose run that re-aligned audio already in the cache.
+
+    The lookup gated on the mean word score in a window around the looked-up
+    time. That window is one-sided at an entry's first word, and a chapter
+    opening the narrator doesn't read scores terribly, so a start at offset 0
+    was rejected while the entry it came from had aligned perfectly well.
+    """
+
+    def entry(self, opening_score: float):
+        from concordance.cache import Entry, FileFingerprint, GroupKey
+        fp = FileFingerprint("x", 1, 2)
+        words = [(i, i + 4, 100.0 + i, 100.5 + i, opening_score if i < 20 else -0.1)
+                 for i in range(0, 400, 4)]
+        return Entry(key=GroupKey(561, "item", "kepub", 14, 14, 6, 7), items=[(14, 0, 400)],
+                     audio_start=100.0, audio_end=200.0, book_file=fp, audio_file=fp,
+                     aligner={}, words=words)
+
+    def book(self):
+        return types.SimpleNamespace(
+            calibre_id=561, item_id="item", fmt="kepub", book_file=Path("x"),
+            manifest=[("a.m4b", 200.0)], positions={14: 1000, -1: 1400},
+            starts=[ChapterStart(14, 0, "Chapter 15", "heading")])
+
+    def resolve(self, entry):
+        cfg = types.SimpleNamespace(abs_audio_root=None, min_align_score=-1.0)
+        with unittest.mock.patch("concordance.chapters._fresh_entries", return_value=[entry]):
+            return chapters_mod.cached_times(cfg, self.book())
+
+    def test_resolves_a_chapter_starting_at_the_first_word_of_an_entry(self):
+        bad_opening = self.entry(opening_score=-9.0)
+        self.assertIn(0, self.resolve(bad_opening))
+
+    def test_still_refuses_an_entry_that_did_not_align(self):
+        with unittest.mock.patch.object(chapters_mod, "_fresh_entries"):
+            self.assertEqual(self.resolve(self.entry(opening_score=-40.0)), {})
+
+    def test_scores_the_whole_entry_rather_than_the_looked_up_position(self):
+        e = self.entry(opening_score=-9.0)
+        self.assertLess(e.mean_score(e.words[0][2]), -1.0)
+        self.assertGreater(e.overall_score(), -1.0)
+
+
+class EntryAnchorTest(unittest.TestCase):
+    """Both ends of an aligned spine item must be anchors.
+
+    Audio between two items can carry a part announcement with no book text at
+    all, and interpolating a character-to-time rate across it put one chapter's
+    estimate ~390 s early, outside any window the probe would search.
+    """
+
+    def anchors(self):
+        from concordance.cache import Entry, FileFingerprint, GroupKey
+        fp = FileFingerprint("x", 1, 2)
+        # Item 14 is narrated from 900 s; item 13 ends at 500 s. The 400 s between
+        # them is announcement, and holds no characters.
+        words = [(i, i + 4, 900.0 + i, 900.5 + i, -0.1) for i in range(0, 400, 4)]
+        entry = Entry(key=GroupKey(561, "item", "kepub", 14, 14, 6, 7), items=[(14, 0, 400)],
+                      audio_start=900.0, audio_end=1300.0, book_file=fp, audio_file=fp,
+                      aligner={}, words=words)
+        book = types.SimpleNamespace(calibre_id=561, item_id="item", fmt="kepub",
+                                     book_file=Path("x"), manifest=[("a.m4b", 1400.0)],
+                                     positions={13: 600, 14: 1000, -1: 1400}, starts=[])
+        cfg = types.SimpleNamespace(abs_audio_root=None, min_align_score=-1.0)
+        with unittest.mock.patch("concordance.chapters._fresh_entries", return_value=[entry]):
+            return chapters_mod.entry_anchors(cfg, book)
+
+    def test_anchors_both_ends_of_an_aligned_item(self):
+        self.assertEqual(len(self.anchors()), 2)
+
+    def test_pins_the_items_first_character_to_when_narration_starts(self):
+        self.assertIn((1000, 900.0), self.anchors())
+
+    def test_keeps_an_estimate_at_the_item_start_out_of_the_silent_gap(self):
+        from concordance.chapterprobe import estimate
+        with_bounds = sorted([(600, 100.0), (1400, 1400.0)] + self.anchors())
+        without = sorted([(600, 100.0), (1400, 1400.0)])
+        self.assertAlmostEqual(estimate(with_bounds, 1000)[0], 900.0)
+        self.assertGreater(900.0 - estimate(without, 1000)[0], 100.0)
+
+
 class DropCrowdedTest(unittest.TestCase):
     """Starts a few hundred characters apart are numbered switches, not chapters."""
 
