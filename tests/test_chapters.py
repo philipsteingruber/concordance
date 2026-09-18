@@ -81,6 +81,17 @@ class RegionsTest(unittest.TestCase):
         times = [10, 90, 150, 250, 350]
         self.assertEqual(regions(abs_chapters, times), [])
 
+    def test_still_splits_a_chapter_far_longer_than_the_books_median(self):
+        """After one split the ratio is near 1, but a leftover slice is still a slice."""
+        abs_chapters = chapters((0, 100), (100, 200), (200, 300), (300, 1000))
+        times = [10, 150, 250, 400, 600, 800]
+        self.assertEqual(regions(abs_chapters, times), [(3, 3)])
+
+    def test_leaves_a_long_chapter_alone_when_nothing_is_inside_it(self):
+        abs_chapters = chapters((0, 100), (100, 200), (200, 300), (300, 1000))
+        times = [10, 150, 250, 400]
+        self.assertEqual(regions(abs_chapters, times), [])
+
 
 class BuildChaptersTest(unittest.TestCase):
     def test_replaces_a_region_with_the_found_chapters(self):

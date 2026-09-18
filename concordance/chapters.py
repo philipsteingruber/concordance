@@ -22,6 +22,7 @@ import argparse
 import dataclasses
 import json
 import os
+import statistics
 import subprocess
 import sys
 import time
@@ -33,6 +34,7 @@ from .absclient import AbsClient, Chapter
 from .cache import AlignmentCache, manifest_fingerprint
 from .calibre import load_books, spine_file
 from .chapterdetect import ChapterStart, book_positions, detect, load_documents
+from .chapterprobe import estimate, observed_rate
 from .config import Config, ConfigError, ServiceUnavailable, env_number
 from .matching import load_calibre_isbns, match_pairs, normalise_title
 from .orchestrate import docker_options, state_dir
@@ -40,6 +42,9 @@ from .orchestrate import docker_options, state_dir
 MIN_STARTS = 2               # an ABS chapter is split only if it holds at least this many real starts
 MIN_RATIO = 1.5              # ...and the book has at least this many real chapters per ABS chapter
 MAX_GAP = 3                  # unsplit ABS chapters between split ones are rebuilt too, up to this many
+# A chapter this many times the book's median length is a slice whatever the
+# book-level ratio says, so it stays eligible after a book has already been split.
+LONG_CHAPTER_FACTOR = 3.0
 # A chapter mark shorter than this is not worth having: Misery's Part Three
 # alternates between Paul's narrative and the manuscript he is typing and numbers
 # each switch, so starts land as little as four seconds apart. This is a
@@ -99,16 +104,28 @@ def estimate_times(book: Book) -> list[float]:
 def regions(chapters: list[Chapter], times: list[float]) -> list[tuple[int, int]]:
     """Runs of consecutive ABS chapter indexes (0-based, inclusive) that each hold MIN_STARTS+ starts.
 
-    Only for books with clearly more real chapters than ABS chapters: the estimates
-    are proportional, so in a book whose chapters already match, a start near a
-    boundary lands in the neighbouring chapter and would look like a split.
+    Normally only for books with clearly more real chapters than ABS chapters: a
+    start near a boundary can land in the neighbouring chapter, and in a book whose
+    chapters already match that would look like a split.
+
+    A chapter far longer than the book's median is exempt from that test. Once a
+    book has been split once the ratio falls close to 1, and any chapter whose own
+    contents could not be located stays a slice for good - Misery came out of its
+    first split with one 21-minute chapter among a 5-minute median, holding five
+    real chapters that a later fix could have found. Being several times the median
+    is not boundary noise, so the book-level ratio has nothing to say about it.
     """
-    if not chapters or len(times) < MIN_RATIO * len(chapters):
+    if not chapters:
         return []
+    lengths = [c.end - c.start for c in chapters]
+    median = statistics.median(lengths) if lengths else 0.0
+    ratio_ok = len(times) >= MIN_RATIO * len(chapters)
     counts = [sum(c.start <= t < c.end for t in times) for c in chapters]
     out: list[tuple[int, int]] = []
     for i, n in enumerate(counts):
         if n < MIN_STARTS:
+            continue
+        if not ratio_ok and not (median > 0 and lengths[i] > LONG_CHAPTER_FACTOR * median):
             continue
         # A short run of unsplit chapters between split ones is just as arbitrary
         # (release slices that happened to hold one chapter start); rebuild it too,
@@ -340,14 +357,6 @@ def check(cfg: Config, abs_client: AbsClient, query: str) -> int:
 
 def propose(cfg: Config, abs_client: AbsClient, query: str) -> int:
     book = find_book(cfg, abs_client, query)
-    times = estimate_times(book)
-    spans = regions(book.chapters, times)
-    if not spans:
-        print(f"{book.title}: no ABS chapter holds several real chapters; nothing to propose.")
-        return 0
-    lo = {first: book.chapters[first].start for first, _ in spans}
-    in_scope = [k for k, t in enumerate(times)
-                if any(book.chapters[f].start - 300 <= t < book.chapters[l].end + 300 for f, l in spans)]
     remembered = remembered_times(book)
     cached = {**remembered, **cached_times(cfg, book)}
     # Only measured points. The end of the audio is deliberately not an anchor:
@@ -356,6 +365,26 @@ def propose(cfg: Config, abs_client: AbsClient, query: str) -> int:
     anchors = [(0, 0.0)]
     anchors += [(book.pos(book.starts[k]), t) for k, t in cached.items()]
     anchors += entry_anchors(cfg, book)
+    anchors = sorted(set(anchors))
+
+    # Which ABS chapters to rebuild is decided from the same interpolation the
+    # probe uses, not from a whole-book proportion. The proportion divides by
+    # every character in the ebook, so anything the audiobook doesn't narrate
+    # squeezes all of them: Misery carries 23,000 characters of previews for
+    # other books, which pulled its last part 1,700 s early - far enough that the
+    # ABS chapter actually holding those chapters no longer looked like it held
+    # anything, and a second pass found nothing to do.
+    rate = observed_rate(anchors, (book.positions[-1] / book.duration) if book.duration else 0.0)
+    times = [cached[k] if k in cached
+             else estimate(anchors, book.pos(s), rate=rate, limit=book.duration)[0]
+             for k, s in enumerate(book.starts)]
+    spans = regions(book.chapters, times)
+    if not spans:
+        print(f"{book.title}: no ABS chapter holds several real chapters; nothing to propose.")
+        return 0
+    lo = {first: book.chapters[first].start for first, _ in spans}
+    in_scope = [k for k, t in enumerate(times)
+                if any(book.chapters[f].start - 300 <= t < book.chapters[l].end + 300 for f, l in spans)]
     probe = [k for k in in_scope if k not in cached]
     print(f"{book.title}: {len(in_scope)} chapter starts in {len(spans)} region(s); "
           f"{len(in_scope) - len(probe)} already known (alignment cache or an earlier propose), "
