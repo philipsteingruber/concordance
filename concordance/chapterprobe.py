@@ -5,7 +5,7 @@ Input is a JSON file written by `concordance.chapters`:
     {"manifest": [[path, seconds], ...],
      "anchors": [[book_char, audio_seconds], ...],      # known points, at least start and end
      "targets": [{"id": 3, "pos": 81234, "text": "Chapter 3 The next morning..."}, ...],
-     "min_score": -1.0}
+     "min_score": -0.5}
 
 Targets are handled in book order. Each chapter start is estimated by
 interpolating between the nearest known points, and its opening words are

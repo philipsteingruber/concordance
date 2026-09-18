@@ -172,6 +172,43 @@ class CacheLookupTest(unittest.TestCase):
         self.assertIn(0, self.resolve(self.entry(opening_score=-0.1), offset=0))
 
 
+class ChapterScoreGateTest(unittest.TestCase):
+    """A confirmation is an anchor, so it is held to a stricter score than a write.
+
+    On Misery the 21 correct confirmations scored between -0.01 and -0.23 and the
+    two wrong ones -0.92 and -0.93. The wrong pair cleared the -1.0 write gate,
+    placed their chapters about 85 s early, and every later estimate interpolated
+    from them.
+    """
+
+    GOOD = [-0.01, -0.03, -0.05, -0.16, -0.23]
+    BAD = [-0.92, -0.93]
+
+    def test_is_stricter_than_the_write_gate(self):
+        self.assertGreater(chapters_mod.CHAPTER_MIN_SCORE, -1.0)
+
+    def test_accepts_every_score_a_correct_confirmation_produced(self):
+        self.assertTrue(all(s >= chapters_mod.CHAPTER_MIN_SCORE for s in self.GOOD))
+
+    def test_rejects_the_scores_the_wrong_confirmations_produced(self):
+        self.assertTrue(all(s < chapters_mod.CHAPTER_MIN_SCORE for s in self.BAD))
+
+    def test_refuses_a_cached_time_that_only_clears_the_write_gate(self):
+        from concordance.cache import Entry, FileFingerprint, GroupKey
+        fp = FileFingerprint("x", 1, 2)
+        words = [(i, i + 4, 100.0 + i, 100.5 + i, -0.93) for i in range(0, 400, 4)]
+        entry = Entry(key=GroupKey(561, "item", "kepub", 14, 14, 6, 7), items=[(14, 0, 400)],
+                      audio_start=100.0, audio_end=200.0, book_file=fp, audio_file=fp,
+                      aligner={}, words=words)
+        cfg = types.SimpleNamespace(abs_audio_root=None, min_align_score=-1.0)
+        book = types.SimpleNamespace(
+            calibre_id=561, item_id="item", fmt="kepub", book_file=Path("x"),
+            manifest=[("a.m4b", 200.0)], positions={14: 1000, -1: 1400},
+            starts=[ChapterStart(14, 0, "Chapter 15", "heading")])
+        with unittest.mock.patch("concordance.chapters._fresh_entries", return_value=[entry]):
+            self.assertEqual(chapters_mod.cached_times(cfg, book), {})
+
+
 class EntryAnchorTest(unittest.TestCase):
     """Both ends of an aligned spine item must be anchors.
 

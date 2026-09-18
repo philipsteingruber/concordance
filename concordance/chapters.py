@@ -54,6 +54,14 @@ LEAD_SECONDS = 0.5           # chapter marks sit this far before the first spoke
 # when the new chapter list is built. Distinct from MIN_CHAPTER_SECONDS above, which
 # decides which detected starts are worth locating in the first place.
 MIN_MARK_GAP_SECONDS = 5.0
+# A confirmed chapter is not just an answer, it is an anchor: the probe inserts it
+# into the known points and every later estimate interpolates from it. One wrong
+# accept therefore costs the rest of the run, so confirmations are held to a
+# stricter score than CONCORDANCE_MIN_ALIGN_SCORE, which gates writes and can
+# afford to be lenient. Measured on Misery: 22 correct confirmations scored -0.01
+# to -0.23, while a wrong one scored -0.93, slipped past the -1.0 write gate,
+# placed its chapter 85 s early and took about thirty later chapters down with it.
+CHAPTER_MIN_SCORE = env_number("CONCORDANCE_CHAPTER_MIN_SCORE", -0.5, float)
 OPENING_WORDS = 30
 RECENT_LISTENING = timedelta(hours=24)
 
@@ -239,7 +247,8 @@ def cached_times(cfg: Config, book: Book) -> dict[int, float]:
             if start.spine in spines and start.offset < spines[start.spine]:
                 seconds, _ = entry.time_for(start.spine, start.offset)
                 score = entry.mean_score(seconds)
-                if score is not None and score >= cfg.min_align_score:
+                # Same bar as a probe confirmation: a cached time is an anchor too.
+                if score is not None and score >= max(cfg.min_align_score, CHAPTER_MIN_SCORE):
                     out[k] = seconds
     return out
 
@@ -351,7 +360,8 @@ def propose(cfg: Config, abs_client: AbsClient, query: str) -> int:
 
     results: dict[int, dict] = {k: {"status": "cached", "time": cached[k]} for k in in_scope if k in cached}
     if probe:
-        job = {"manifest": book.manifest, "anchors": sorted(anchors), "min_score": cfg.min_align_score,
+        job = {"manifest": book.manifest, "anchors": sorted(anchors),
+               "min_score": max(cfg.min_align_score, CHAPTER_MIN_SCORE),
                "threads": int(os.environ.get("CONCORDANCE_ALIGNER_THREADS", "0") or 0),
                "targets": [{"id": k, "pos": book.pos(book.starts[k]), "text": opening_text(book, book.starts[k])}
                            for k in probe]}
