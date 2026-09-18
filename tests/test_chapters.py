@@ -7,7 +7,7 @@ from concordance import chapters as chapters_mod
 
 from concordance.absclient import Chapter
 from concordance.chapterdetect import ChapterStart, _label_parts, _numbered_runs, chapter_number, heading_blocks
-from concordance.chapterprobe import MIN_HALF_WINDOW, estimate, half_window, judge
+from concordance.chapterprobe import estimate, half_window, judge
 from concordance.chapters import build_chapters, regions
 from concordance.xpointer import parse_document
 
@@ -139,29 +139,16 @@ class ProbeTest(unittest.TestCase):
     def test_interpolates_between_the_nearest_known_points(self):
         self.assertEqual(estimate([(0, 0.0), (1000, 500.0), (2000, 600.0)], 1500), (550.0, 500.0, 600.0))
 
-    def test_widens_the_window_for_a_longer_gap_between_known_points(self):
-        self.assertGreater(half_window(0.0, 20_000.0), half_window(0.0, 2_000.0))
-
-    def test_sizes_the_window_from_the_gap_not_from_where_in_it_the_target_falls(self):
-        """The old rule measured from the previous known point, so a target just
-        past one got a minimum window however long the gap it sat in."""
-        self.assertGreater(half_window(0.0, 10_000.0), MIN_HALF_WINDOW)
+    def test_widens_the_window_with_distance_from_the_last_known_point(self):
+        self.assertGreater(half_window(3000.0, 0.0), half_window(300.0, 0.0))
 
     def test_accepts_a_well_scored_start_away_from_the_window_edges(self):
         words = [{"start": 40.0, "score": -0.1}] * 5
-        self.assertEqual(judge(words, 1000.0, 1120.0, -1.0)[:3], (True, 1040.0, -0.1))
+        self.assertEqual(judge(words, 1000.0, 1120.0, -1.0), (True, 1040.0, -0.1))
 
     def test_rejects_a_start_pressed_against_the_window_edge(self):
         words = [{"start": 0.5, "score": -0.1}] * 5
         self.assertFalse(judge(words, 1000.0, 1120.0, -1.0)[0])
-
-    def test_accepts_a_start_sitting_on_a_known_point_rather_than_a_window_edge(self):
-        words = [{"start": 0.5, "score": -0.1}] * 5
-        self.assertTrue(judge(words, 1000.0, 1120.0, -1.0, soft_lo=False)[0])
-
-    def test_reports_which_edge_a_rejected_match_landed_against(self):
-        words = [{"start": 119.8, "score": -0.1}] * 5
-        self.assertEqual(judge(words, 1000.0, 1120.0, -1.0)[3], "against the end of the window")
 
     def test_rejects_a_poorly_scored_match(self):
         words = [{"start": 40.0, "score": -3.0}] * 5
