@@ -8,7 +8,7 @@ from concordance import chapters as chapters_mod
 from concordance.absclient import Chapter
 from concordance.chapterdetect import (ChapterStart, _label_parts, _numbered_runs, book_positions,
                                        chapter_number, heading_blocks)
-from concordance.chapterprobe import estimate, half_window, judge, observed_rate
+from concordance.chapterprobe import EDGE_SECONDS, estimate, half_window, judge, observed_rate
 from concordance.chapters import build_chapters, regions
 from concordance.xpointer import parse_document
 
@@ -335,6 +335,25 @@ class DropCrowdedTest(unittest.TestCase):
         fast = chapters_mod.drop_crowded(self.starts(0, 700), {1: 0},
                                          total_chars=360_000, duration=3_600.0)  # 100 chars/s
         self.assertEqual((len(slow), len(fast)), (2, 1))
+
+
+class ClampSlackTest(unittest.TestCase):
+    """A chapter may begin a second or two after the previous known point.
+
+    The window is clamped to the known points, and the edge test then throws out
+    anything landing within three seconds of one. Misery's Part Two chapter 15
+    begins 2.4 s after the previous spine item's narration ends, so it was refused
+    for being exactly where it belongs.
+    """
+
+    def test_stands_the_lower_clamp_back_from_the_known_point(self):
+        from concordance.chapterprobe import CLAMP_SLACK
+        self.assertGreater(CLAMP_SLACK, EDGE_SECONDS)
+
+    def test_accepts_a_start_just_after_the_previous_known_point(self):
+        words = [{"start": 17.4, "score": -0.03}] * 5
+        lo = 1000.0 - 15.0
+        self.assertTrue(judge(words, lo, lo + 120.0, -0.5)[0])
 
 
 class TailEstimateTest(unittest.TestCase):

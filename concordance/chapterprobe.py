@@ -36,6 +36,12 @@ from pathlib import Path
 MIN_HALF_WINDOW = 60.0
 MAX_HALF_WINDOW = 480.0
 EDGE_SECONDS = 3.0
+# The window is clamped to the known points either side. A chapter can legitimately
+# begin within a second or two of one - Misery's Part Two chapter 15 starts 2.4 s
+# after the previous item's narration ends - and would then sit inside EDGE_SECONDS
+# of the clamp and be thrown out. Standing the clamp back by this much costs
+# nothing: a start earlier than the previous *chapter* is still refused outright.
+CLAMP_SLACK = 15.0
 SCORED_WORDS = 12
 
 
@@ -149,8 +155,9 @@ def main(argv: list[str] | None = None) -> int:
         half = half_window(est, known_before)
         result = {"id": target["id"], "estimate": round(est, 1), "status": "unconfirmed"}
         for attempt in range(2):
-            lo = max(0.0, known_before, est - half)
-            hi = min(total, known_after if known_after > known_before else total, est + half)
+            lo = max(0.0, known_before - CLAMP_SLACK, est - half)
+            hi = min(total, (known_after + CLAMP_SLACK) if known_after > known_before else total,
+                     est + half)
             if hi - lo < 10:
                 break
             emissions, stride = sliced_emissions(model, decode_audio(manifest, lo, hi), 0, 1)
