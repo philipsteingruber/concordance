@@ -222,18 +222,32 @@ class DropCrowdedTest(unittest.TestCase):
     def starts(self, *offsets):
         return [ChapterStart(1, o, str(o), "heading") for o in offsets]
 
+    def drop(self, *offsets):
+        """A book of 10 characters per second, so the 60 s floor is 600 characters."""
+        return chapters_mod.drop_crowded(self.starts(*offsets), {1: 0},
+                                         total_chars=36_000, duration=3_600.0)
+
     def test_drops_a_start_too_close_to_the_one_before_it(self):
-        kept = chapters_mod.drop_crowded(self.starts(0, 353, 1721), {1: 0})
-        self.assertEqual([s.offset for s in kept], [0, 1721])
+        self.assertEqual([s.offset for s in self.drop(0, 353, 1721)], [0, 1721])
 
     def test_measures_the_gap_from_the_last_kept_start_not_the_last_seen(self):
         """Otherwise a slow drip of sub-threshold steps would all survive."""
-        kept = chapters_mod.drop_crowded(self.starts(0, 1000, 2000), {1: 0})
-        self.assertEqual([s.offset for s in kept], [0, 2000])
+        self.assertEqual([s.offset for s in self.drop(0, 400, 800)], [0, 800])
 
     def test_keeps_starts_that_are_a_real_chapter_apart(self):
-        kept = chapters_mod.drop_crowded(self.starts(0, 20_000), {1: 0})
-        self.assertEqual(len(kept), 2)
+        self.assertEqual(len(self.drop(0, 20_000)), 2)
+
+    def test_converts_the_floor_with_the_books_own_reading_rate(self):
+        """700 characters is a minute of slow narration but seconds of fast narration.
+
+        The floor is a duration, so the same character gap survives in the book
+        read slowly and is dropped in the book read quickly.
+        """
+        slow = chapters_mod.drop_crowded(self.starts(0, 700), {1: 0},
+                                         total_chars=36_000, duration=3_600.0)   # 10 chars/s
+        fast = chapters_mod.drop_crowded(self.starts(0, 700), {1: 0},
+                                         total_chars=360_000, duration=3_600.0)  # 100 chars/s
+        self.assertEqual((len(slow), len(fast)), (2, 1))
 
 
 class ProbeTest(unittest.TestCase):

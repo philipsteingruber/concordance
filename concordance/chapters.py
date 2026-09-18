@@ -33,22 +33,27 @@ from .absclient import AbsClient, Chapter
 from .cache import AlignmentCache, manifest_fingerprint
 from .calibre import load_books, spine_file
 from .chapterdetect import ChapterStart, book_positions, detect, load_documents
-from .config import Config, ConfigError, ServiceUnavailable
+from .config import Config, ConfigError, ServiceUnavailable, env_number
 from .matching import load_calibre_isbns, match_pairs, normalise_title
 from .orchestrate import docker_options, state_dir
 
 MIN_STARTS = 2               # an ABS chapter is split only if it holds at least this many real starts
 MIN_RATIO = 1.5              # ...and the book has at least this many real chapters per ABS chapter
 MAX_GAP = 3                  # unsplit ABS chapters between split ones are rebuilt too, up to this many
-# A detected start this close to the one before it is not a chapter worth marking.
-# Misery's Part Three alternates between Paul's narrative and the manuscript he is
-# typing, numbering each switch, so starts land 353 characters apart - about two
-# seconds of narration. Marking those produces chapters nobody can navigate by,
-# and the aligner cannot tell them apart either.
-MIN_CHAPTER_CHARS = 1500
+# A chapter mark shorter than this is not worth having: Misery's Part Three
+# alternates between Paul's narrative and the manuscript he is typing and numbers
+# each switch, so starts land as little as four seconds apart. This is a
+# usability floor, not a correctness guard - `chapterprobe` rejects a start at or
+# before the previous one whatever this is set to. Measured in audio seconds
+# rather than characters because characters per second varies by book, and it is
+# the duration that decides whether a listener can navigate by the mark.
+MIN_CHAPTER_SECONDS = env_number("CONCORDANCE_MIN_CHAPTER_SECONDS", 60.0, float)
 SNAP_SECONDS = 20.0          # a real start this close to a region's start replaces it
 LEAD_SECONDS = 0.5           # chapter marks sit this far before the first spoken word
-MIN_CHAPTER_SECONDS = 5.0
+# Last-ditch collapse of confirmed marks landing almost on top of each other, applied
+# when the new chapter list is built. Distinct from MIN_CHAPTER_SECONDS above, which
+# decides which detected starts are worth locating in the first place.
+MIN_MARK_GAP_SECONDS = 5.0
 OPENING_WORDS = 30
 RECENT_LISTENING = timedelta(hours=24)
 
@@ -130,7 +135,7 @@ def build_chapters(chapters: list[Chapter], spans: list[tuple[int, int]],
         marks: list[tuple[float, str]] = []
         for t, title in inside:
             t = max(start, t - LEAD_SECONDS)
-            if marks and t - marks[-1][0] < MIN_CHAPTER_SECONDS:
+            if marks and t - marks[-1][0] < MIN_MARK_GAP_SECONDS:
                 continue
             marks.append((t, title))
         if not marks:
@@ -172,20 +177,31 @@ def find_book(cfg: Config, abs_client: AbsClient, query: str) -> Book:
     docs = load_documents(book_file)
     item = pair.audiobook.library_item_id
     positions = book_positions(docs)
+    manifest = abs_client.audio_manifest(item)
+    duration = sum(d for _, d in manifest)
     return Book(pair.calibre.book_id, pair.calibre.title, item, fmt, book_file, docs,
-                drop_crowded(detect(book_file, docs), positions), positions,
-                abs_client.chapters(item), abs_client.audio_manifest(item))
+                drop_crowded(detect(book_file, docs), positions, positions[-1], duration),
+                positions, abs_client.chapters(item), manifest)
 
 
-def drop_crowded(starts: list[ChapterStart], positions: dict[int, int]) -> list[ChapterStart]:
-    """Keep the first of any run of starts closer together than MIN_CHAPTER_CHARS."""
+def drop_crowded(starts: list[ChapterStart], positions: dict[int, int],
+                 total_chars: int, duration: float) -> list[ChapterStart]:
+    """Keep the first of any run of starts less than MIN_CHAPTER_SECONDS apart.
+
+    The book's own average characters per second converts the floor, so a densely
+    set book and an airy one get the same treatment in the units a listener cares
+    about.
+    """
+    if total_chars <= 0 or duration <= 0:
+        return list(starts)
+    floor = MIN_CHAPTER_SECONDS * total_chars / duration
     kept: list[ChapterStart] = []
     last: int | None = None
     for start in starts:
         if start.spine not in positions:
             continue
         here = positions[start.spine] + start.offset
-        if last is None or here - last >= MIN_CHAPTER_CHARS:
+        if last is None or here - last >= floor:
             kept.append(start)
             last = here
     return kept
