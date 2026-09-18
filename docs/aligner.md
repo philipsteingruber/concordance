@@ -65,6 +65,38 @@ On the 40-minute chapter:
   (default −1.0) sits between them. An entry that falls below it is ignored by
   sync and logged as `aligned-low-score`.
 
+### How wrong the fallback is
+
+Every cached alignment holds both the true word time and the proportional
+estimate the `interpolated` tier would have produced, so the fallback can be
+scored against itself. Five single-chapter segments across three books,
+45,000 words:
+
+| Segment span | RMS error | as % of span | Worst | as % of span |
+| ---: | ---: | ---: | ---: | ---: |
+| 5.6 min | 6.5 s | 1.93% | 13.3 s | 3.95% |
+| 11.3 min | 3.6 s | 0.54% | 10.1 s | 1.49% |
+| 11.8 min | 6.4 s | 0.90% | 14.8 s | 2.08% |
+| 40.3 min | 19.7 s | 0.82% | 36.6 s | 1.52% |
+| 219.4 min | 42.3 s | 0.32% | 97.4 s | 0.74% |
+
+The error scales with the segment, not with the book: **worst case is about 2%
+of the segment's span**, so 12 s for a 10-minute chapter and 100 s for a
+3-hour one.
+
+Two things follow. The 2.5-minute rewind on writes toward the audiobook
+comfortably exceeds the worst case for any segment under two hours, which is
+what makes an interpolated write safe in that direction. And shortening the
+segment is the only lever that scales, because the relationship is linear —
+which is why `concordance-chapters` is worth running on a badly chaptered book
+even if you never look at the chapter list.
+
+Correcting for the error does not work. The direction is not consistent between
+books (signed means ranged from −10 s to +17 s), so a fixed offset tuned on one
+book makes another worse. A per-segment linear fit halves the error on short
+segments but barely moves a 3-hour one, because inside a long segment the error
+wanders with each chapter's pace rather than drifting one way.
+
 ## Long chapters
 
 Before running, the worker estimates its peak memory. If a group won't fit

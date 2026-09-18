@@ -40,14 +40,24 @@ Positions are placed in tiers, and only the precise ones are written:
 | Tier | Where the position comes from | Typical error | Written |
 | --- | --- | --- | --- |
 | `aligned` | Cached word timings | about a word | yes |
-| `interpolated` | Proportion within the chapter | 15–40 s | yes |
+| `interpolated` | Proportion within the chapter | ~2% of the chapter's length | yes |
 | `anchor` | Start of the chapter | up to a chapter | no |
 | `percentage` | Whole-book proportion | minutes | no |
 | `finished` | Either side marked finished | — | yes |
 
+The `interpolated` figure is measured, and it scales with the chapter rather
+than with the book: a 10-minute chapter lands within about 12 seconds, a
+3-hour one within about 100. So a release that marks the whole of Part One as a
+single chapter is far less accurate than the tier name suggests, and
+[`concordance-chapters`](#fixing-chapter-marks-in-audiobookshelf) is the fix —
+it shortens the segments, which is the only thing that improves this tier
+without running the aligner.
+
 When both sides have a position, the one further along wins, and writes only
 ever move forward. Writes toward the audiobook land 2.5 minutes early, because
-skipping forward in audio is easy and hunting backwards isn't.
+skipping forward in audio is easy and hunting backwards isn't. That head start
+is also what makes interpolated writes safe: it is larger than the worst error
+measured on any segment under two hours.
 [docs/design.md](docs/design.md) explains these choices and the API behaviour
 behind them; [docs/aligner.md](docs/aligner.md) covers alignment cost and
 accuracy.
@@ -172,9 +182,16 @@ jumps to the exact spot.
 ## Fixing chapter marks in Audiobookshelf
 
 Some audiobook releases mark arbitrary slices of the recording as chapters: ten
-70-minute "Chapter N" tracks for a book that has 120 chapters. That makes the
-player's chapter list useless. `concordance-chapters` rebuilds those slices from
-the ebook's real chapters, one book at a time:
+70-minute "Chapter N" tracks for a book that has 120 chapters. The obvious cost
+is a useless chapter list in the player. The larger one is accuracy: every
+position that isn't word-aligned is placed proportionally inside its chapter,
+and that error grows with the chapter, so a 70-minute slice is roughly seven
+times worse than a real 10-minute chapter.
+
+`concordance-chapters` rebuilds those slices from the ebook's real chapters, one
+book at a time. Doing it once permanently improves every later sync of that
+book, and it costs no extra alignment — chapter starts already confirmed are
+reused:
 
 ```bash
 concordance-chapters check 561      # instant: ABS chapters vs real chapters, per ABS chapter
