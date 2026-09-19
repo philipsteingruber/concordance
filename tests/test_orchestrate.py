@@ -12,7 +12,7 @@ from concordance.cache import GroupKey
 from concordance.config import Config, ConfigError
 from concordance.orchestrate import (Job, aligner_stats, alignment_status, current_group_index, docker_command,
                                      fits_before_deadline, group_span, in_progress, memory_wait_until,
-                                     parse_deadline, select_groups)
+                                     no_group_reason, parse_deadline, select_groups)
 
 # Four equal 1000 s chapters, four equal spine items (5-8): a clean 1:1 book.
 SPINE = [SpineItem(index=i, href=f"c{i}.xhtml", chars=20_000) for i in (5, 6, 7, 8)]
@@ -38,6 +38,37 @@ class GroupSelectionTest(unittest.TestCase):
 
     def test_queues_nothing_when_no_position_falls_in_a_group(self):
         self.assertEqual(select_groups(ALIGNMENT, None, None, lookahead=2), [])
+
+
+class NoGroupReasonTest(unittest.TestCase):
+    def test_names_front_matter_when_the_ebook_sits_before_the_first_matched_item(self):
+        reason = no_group_reason(ALIGNMENT, ebook_spine=2, audio_time=None)
+        self.assertIn("front matter", reason)
+
+    def test_reports_the_spine_item_the_ebook_is_actually_on(self):
+        reason = no_group_reason(ALIGNMENT, ebook_spine=2, audio_time=None)
+        self.assertIn("spine item 2", reason)
+
+    def test_tells_the_reader_to_read_on_when_the_position_is_in_front_matter(self):
+        reason = no_group_reason(ALIGNMENT, ebook_spine=2, audio_time=None)
+        self.assertIn("read on into the first chapter", reason)
+
+    def test_calls_a_position_past_the_last_matched_item_end_matter(self):
+        reason = no_group_reason(ALIGNMENT, ebook_spine=99, audio_time=None)
+        self.assertIn("end matter", reason)
+
+    def test_reports_audio_running_past_the_last_matched_chapter(self):
+        reason = no_group_reason(ALIGNMENT, ebook_spine=None, audio_time=9000.0)
+        self.assertIn("past the last matched chapter", reason)
+
+    def test_describes_both_sides_when_neither_falls_in_a_group(self):
+        reason = no_group_reason(ALIGNMENT, ebook_spine=2, audio_time=9000.0)
+        self.assertIn("ebook is at", reason)
+        self.assertIn("audio is at", reason)
+
+    def test_falls_back_to_the_bare_message_when_the_book_has_no_groups(self):
+        empty = dataclasses.replace(ALIGNMENT, groups=[])
+        self.assertEqual(no_group_reason(empty, 2, None), "position not in any group (no groups to match against)")
 
 
 class InProgressTest(unittest.TestCase):

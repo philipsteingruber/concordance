@@ -77,6 +77,14 @@ class Group:
     text_fraction: float     # share of the book's text
     audio_fraction: float    # share of the book's audio
     audio_seconds: float
+    # The chapters' own span. Held separately because first_spine/last_spine may
+    # be trimmed past never-narrated edge items, and the audio still has to cover
+    # the whole group: the narrator's opening announcement occupies the seconds
+    # the trimmed text would have claimed, and the aligner absorbs it as an edge
+    # wildcard. Deriving the span from the surviving items instead would move
+    # the window by a proportional estimate of text that isn't in the audio.
+    audio_start: float = 0.0
+    audio_end: float = 0.0
 
     @property
     def ratio(self) -> float:
@@ -243,6 +251,27 @@ def _estimate_log_scale(text: list[float], audio: list[float], path: list[tuple[
     return statistics.median(ratios) if ratios else 0.0
 
 
+def trim_unnarrated_edges(items: list[SpineItem]) -> list[SpineItem]:
+    """Drop never-narrated items from the front and back of a group.
+
+    Front matter carries no audio, so aligning it crams hundreds of words into
+    the opening seconds at word scores around -10, which sinks the mean for the
+    whole group and gets a perfectly good chapter rejected. Measured on Jade
+    City's first group: 599 words of copyright page and table of contents at
+    -9.96 dragged 2,950 chapter words scoring -0.279 down to -1.91, under the
+    -1.0 gate.
+
+    Only the edges are trimmed. An interior item stays even if it looks
+    structural, because dropping one would split the group's text from its audio
+    and because that is precisely where the 2026-09-16 classifier experiment's
+    false positives landed. Everything is kept if nothing would survive.
+    """
+    keep = [i for i, item in enumerate(items) if item.narrated]
+    if not keep:
+        return items
+    return items[keep[0]:keep[-1] + 1]
+
+
 def build_alignment(spine: list[SpineItem], chapters: list[Chapter]) -> Alignment:
     """Align content spine items to substantive chapters by matching boundaries."""
     content = [item for item in spine if item.is_content]
@@ -288,12 +317,14 @@ def build_alignment(spine: list[SpineItem], chapters: list[Chapter]) -> Alignmen
         chs = chapters[pj:j]
         span_start, span_end = chs[0].start, chs[-1].end
         group_chars = sum(item.chars for item in items) or 1
+        narrated = trim_unnarrated_edges(items)
         groups.append(Group(
-            first_spine=items[0].index, last_spine=items[-1].index,
+            first_spine=narrated[0].index, last_spine=narrated[-1].index,
             first_chapter=chs[0].index, last_chapter=chs[-1].index,
             text_fraction=text_cum[i] - text_cum[pi],
             audio_fraction=audio_cum[j] - audio_cum[pj],
             audio_seconds=span_end - span_start,
+            audio_start=span_start, audio_end=span_end,
         ))
         misfits.append((
             abs((text_cum[i] - text_cum[pi]) - (audio_cum[j] - audio_cum[pj])) * total_seconds / 60.0,

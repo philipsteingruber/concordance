@@ -23,12 +23,55 @@ _WS = re.compile(r"\s+")
 # chapters are aligned by ordinal position.
 MIN_CONTENT_CHARS = 1500
 
+# Roles a narrator never reads aloud. Deliberately excludes the "sometimes
+# narrated" set (dedication, epigraph, foreword, preface, acknowledgements,
+# afterword): those do appear in recordings, and dropping a narrated item is
+# what made the 2026-09-16 classifier experiment produce false positives.
+# A table of contents is the important one here. It clears MIN_CONTENT_CHARS
+# comfortably (Jade City's is 2,091 chars of chapter titles), so length alone
+# cannot tell it apart from a short chapter, and aligning it against the
+# opening minutes of the audio wrecks that group's score.
+NEVER_NARRATED_TYPES = frozenset({
+    "cover", "titlepage", "title-page", "toc", "copyright-page", "copyright",
+    "colophon", "landmarks", "loi", "lot", "index", "backmatter-toc",
+})
+_EPUB_TYPE = re.compile(rb'epub:type\s*=\s*["\']([^"\']+)["\']')
+_HEADING = re.compile(rb"(?is)<h[1-6][^>]*>(.*?)</h[1-6]>")
+# Headings that name a structural page. Kept deliberately small: every entry
+# has to be a title no novel would give a real chapter. Publishers mislabel the
+# machine-readable role (Jade City's copyright page declares
+# `epub:type="bodymatter chapter"`), so this is the only signal left for it.
+NEVER_NARRATED_HEADINGS = frozenset({
+    "copyright", "contents", "table of contents", "cover", "title page",
+    "also by this author", "about the publisher",
+})
+
+
+def _never_narrated(doc: bytes) -> bool:
+    """Whether the document declares a role no narrator reads.
+
+    Only the first few declarations are considered: `epub:type` also appears on
+    inline elements deep in real chapters (`noteref`, `pagebreak`), and a
+    chapter that happens to cite a footnote must not be mistaken for structure.
+    """
+    tokens: set[str] = set()
+    for match in _EPUB_TYPE.findall(doc[:4096]):
+        tokens.update(match.decode("utf-8", "replace").lower().split())
+    if tokens & NEVER_NARRATED_TYPES:
+        return True
+    heading = _HEADING.search(doc)
+    if heading is None:
+        return False
+    text = _WS.sub(" ", html.unescape(_TAG.sub("", heading.group(1).decode("utf-8", "replace"))))
+    return text.strip().lower() in NEVER_NARRATED_HEADINGS
+
 
 @dataclass(frozen=True)
 class SpineItem:
     index: int          # 1-based position in the spine, matching DocFragment[N]
     href: str
     chars: int
+    narrated: bool = True   # False only when the EPUB says the role is never read aloud
 
     @property
     def is_content(self) -> bool:
@@ -133,6 +176,19 @@ def read_spine(epub_path: Path) -> list[SpineItem]:
                 item.get("id"): item.get("href")
                 for item in opf.findall(".//{*}manifest/{*}item")
             }
+            # The EPUB 3 navigation document is structure, never narration, and
+            # it is the one item that reliably carries a machine-readable role.
+            nav_ids = {
+                item.get("id")
+                for item in opf.findall(".//{*}manifest/{*}item")
+                if "nav" in (item.get("properties") or "").split()
+            }
+            # EPUB 2 books have no epub:type; the OPF guide is the equivalent.
+            guide_hrefs = {
+                (ref.get("href") or "").split("#")[0]
+                for ref in opf.findall(".//{*}guide/{*}reference")
+                if (ref.get("type") or "").lower() in NEVER_NARRATED_TYPES
+            }
             items: list[SpineItem] = []
             for i, ref in enumerate(opf.findall(".//{*}spine/{*}itemref"), start=1):
                 href = manifest.get(ref.get("idref"))
@@ -140,10 +196,18 @@ def read_spine(epub_path: Path) -> list[SpineItem]:
                     continue
                 name = f"{base}/{href}" if base else href
                 try:
-                    chars = _visible_chars(zf.read(name))
+                    doc = zf.read(name)
                 except KeyError:
-                    chars = 0
-                items.append(SpineItem(index=i, href=href, chars=chars))
+                    doc, chars = b"", 0
+                else:
+                    chars = _visible_chars(doc)
+                narrated = not (
+                    ref.get("linear") == "no"
+                    or ref.get("idref") in nav_ids
+                    or href.split("#")[0] in guide_hrefs
+                    or _never_narrated(doc)
+                )
+                items.append(SpineItem(index=i, href=href, chars=chars, narrated=narrated))
             return items
     except (zipfile.BadZipFile, ET.ParseError, KeyError, OSError) as exc:
         raise RuntimeError(f"cannot read EPUB {epub_path.name}: {exc}") from exc

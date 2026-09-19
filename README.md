@@ -217,6 +217,54 @@ device 'concordance'?"*. The percentage is 2 points below the real one on
 purpose, so your Kobo's own saves aren't rejected as being behind. Accepting
 jumps to the exact spot.
 
+## Starting a new book
+
+The steps below are worth doing in this order. Most of the accuracy a book will
+ever have is decided before the first sync runs.
+
+1. **Get the ebook onto the reader the way KOReader can see it.** Download it
+   from CWA through KOReader's own OPDS browser. Books delivered by CWA's native
+   Kobo sync don't appear in KOReader at all, and the OPDS route is what hands
+   you the KEPUB that position resolution expects.
+2. **Check the pair:** `concordance --book-id <id>`. Nothing is sent. You're
+   looking at the chapter match: `high` or `medium` is fine, `low` is written
+   but worth reading the report for first, and `unusable` means the two
+   structures couldn't be reconciled and only a whole-book percentage is
+   available, which is never written. Leave `--progress-only` off here — it
+   hides every pair that doesn't already have a position on one side, which is
+   exactly the state a book you haven't started is in. If the book really has
+   no counterpart, it shows up under "audiobooks with no ebook counterpart"
+   instead.
+3. **Look at the audiobook's chapter marks:**
+   [`concordance-chapters check <id>`](#fixing-chapter-marks-in-audiobookshelf).
+   This costs nothing and it's the largest single improvement available for a
+   book that isn't aligned yet: a position inside a 70-minute slice is placed
+   proportionally, so it lands a minute or two out, where a real 10-minute
+   chapter lands within about 12 seconds. If `check` says the book qualifies,
+   run `propose`, read what it found, then `apply`.
+4. **Read past the front matter.** Opening the book isn't enough. A position on
+   the title page, the table of contents or the dedication is in part of the
+   ebook that has no audio to match it, so it belongs to no chapter group, and
+   a book whose only position is there is skipped with `position not in any
+   group`. Page forward until you're in the first real chapter and let the
+   reader save that position.
+5. **Get an alignment in before you need it.** The nightly run only plans the
+   chapter group you're in and the next couple, so it does nothing at all for a
+   book you haven't started. Read a chapter and let the next night cover it, or
+   run it yourself with
+   `python3 -m concordance.orchestrate --run --book-id <id>`. Either way, check
+   the mean score in `~/.cache/concordance/runs/align-YYYYMMDD.jsonl` before
+   relying on it.
+6. **Allowlist it last:** `concordance-allow add <id>`. Then let one sync run
+   and check the result by ear. A write toward the audiobook should start about
+   two and a half minutes before where you stopped reading; that's the rewind,
+   not an error.
+
+Steps 3 and 5 can go either way round. `apply` renames the alignment cache
+entries it affects rather than discarding them, and `propose` is faster on a
+book that's already aligned, so if the aligner has run there's no reason to
+avoid fixing the chapters afterwards. Only the allowlist has to come last.
+
 ## Fixing chapter marks in Audiobookshelf
 
 Some audiobook releases mark arbitrary slices of the recording as chapters: ten

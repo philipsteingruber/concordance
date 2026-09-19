@@ -76,9 +76,14 @@ class Job:
 
 
 def group_span(alignment: Alignment, index: int) -> tuple[float, float]:
+    """The group's audio window: its chapters' own span, not its items'.
+
+    The group carries this directly, because first_spine/last_spine may have
+    been trimmed past never-narrated front matter and the window still has to
+    cover the audio those items would have claimed.
+    """
     group = alignment.groups[index]
-    points = [p for p in alignment.points if group.first_spine <= p.spine_index <= group.last_spine]
-    return min(p.audio_start for p in points), max(p.audio_end for p in points)
+    return group.audio_start, group.audio_end
 
 
 def current_group_index(alignment: Alignment, ebook_spine: int | None,
@@ -103,6 +108,41 @@ def select_groups(alignment: Alignment, ebook_spine: int | None, audio_time: flo
     if current is None:
         return []
     return list(range(current, min(current + 1 + lookahead, len(alignment.groups))))
+
+
+def no_group_reason(alignment: Alignment, ebook_spine: int | None, audio_time: float | None) -> str:
+    """Why no group was selected, in terms the reader can act on.
+
+    Reaching here means one side reported a position and neither fell inside a
+    matched group. Much the most common cause is a book that has been opened but
+    not read into: front matter has no audio to match, so it is in no group, and
+    the fix is to turn pages rather than to investigate the matching.
+    """
+    if not alignment.groups:
+        return "position not in any group (no groups to match against)"
+    first, last = alignment.groups[0], alignment.groups[-1]
+    parts = []
+    if ebook_spine is not None:
+        if ebook_spine < first.first_spine:
+            parts.append(f"ebook is at spine item {ebook_spine}, before the first matched item "
+                         f"{first.first_spine} (front matter) — read on into the first chapter")
+        elif ebook_spine > last.last_spine:
+            parts.append(f"ebook is at spine item {ebook_spine}, past the last matched item "
+                         f"{last.last_spine} (end matter)")
+        else:
+            parts.append(f"ebook is at spine item {ebook_spine}, which falls between matched groups")
+    if audio_time is not None:
+        end = group_span(alignment, len(alignment.groups) - 1)[1]
+        start = group_span(alignment, 0)[0]
+        if audio_time < start:
+            parts.append(f"audio is at {audio_time:.0f}s, before the first matched chapter ({start:.0f}s)")
+        elif audio_time >= end:
+            parts.append(f"audio is at {audio_time:.0f}s, past the last matched chapter ({end:.0f}s)")
+        else:
+            parts.append(f"audio is at {audio_time:.0f}s, which falls between matched groups")
+    if not parts:
+        return "position not in any group"
+    return "position not in any group: " + "; ".join(parts)
 
 
 def mem_available_mb() -> int:
@@ -163,9 +203,11 @@ def plan_jobs(cfg: Config, lookahead: int, only: set[int] | None, log) -> list[J
             log({"book": pair.calibre.title, "status": "skipped", "reason": "no boundary alignment"})
             continue
 
-        indices = select_groups(alignment, spine, audio.current_time if audio else None, lookahead)
+        audio_time = audio.current_time if audio else None
+        indices = select_groups(alignment, spine, audio_time, lookahead)
         if not indices:
-            log({"book": pair.calibre.title, "status": "skipped", "reason": "position not in any group"})
+            log({"book": pair.calibre.title, "status": "skipped",
+                 "reason": no_group_reason(alignment, spine, audio_time)})
             continue
         manifest = abs_client.audio_manifest(pair.audiobook.library_item_id)
         abs_root, host_root = cfg.abs_audio_root or ("", "")
