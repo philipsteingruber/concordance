@@ -234,7 +234,7 @@ def align_text(emissions, stride, tokenizer, text: str) -> list[dict]:
 
 def align_chunked(model, tokenizer, manifest, text: str, start: float, end: float,
                   budget_mb: float, target_seconds: float, end_margin: float,
-                  batch_size: int, stats: dict) -> list[dict]:
+                  batch_size: int, stats: dict, end_slack: float = 0.0) -> list[dict]:
     """Align a long group in pieces, each inside its own bounded audio window.
 
     Each piece is a run of whole words sized to ~target_seconds of narration.
@@ -245,6 +245,15 @@ def align_chunked(model, tokenizer, manifest, text: str, start: float, end: floa
     window's end, the window was too short: it is retried with double the
     margin. Every window is checked against the memory budget before any audio
     is decoded; an over-budget piece is shrunk rather than run.
+
+    `end` comes from the boundary matcher's coarse spine-to-chapter grid, which
+    on some books runs hundreds of seconds early (Misery: 530 s median, p90
+    671). It is therefore a soft target: a piece may reach up to `end_slack`
+    past it, and the wall test applies to the last piece too. Before 2026-09-19
+    it did not -- the final piece was pinned to `end` and excluded from the
+    retry, making it the one piece that could neither detect nor recover from a
+    short window, so its text was crammed against the boundary at 3-4x
+    narration rate.
     """
     import re as _re
 
@@ -252,6 +261,7 @@ def align_chunked(model, tokenizer, manifest, text: str, start: float, end: floa
     words: list[dict] = []
     cursor_token, cursor_time = 0, start
     chunks = []
+    hard_end = end + max(0.0, end_slack)
     while cursor_token < len(spans):
         remaining_chars = max(1, spans[-1][1] - spans[cursor_token][0])
         rate = max(end - cursor_time, 1.0) / remaining_chars
@@ -262,7 +272,10 @@ def align_chunked(model, tokenizer, manifest, text: str, start: float, end: floa
             piece = text[spans[cursor_token][0]:spans[stop - 1][1]]
             est = (spans[stop - 1][1] - spans[cursor_token][0]) * rate
             w_start = max(start, cursor_time - 5.0)
-            w_end = end if stop == len(spans) else min(end, cursor_time + est * 1.15 + margin)
+            reach = cursor_time + est * 1.15 + margin
+            # The last piece still claims at least everything up to `end`, so a
+            # book whose grid is accurate behaves exactly as it did before.
+            w_end = min(hard_end, max(end, reach) if stop == len(spans) else reach)
             peak = estimate_peak_mb(w_end - w_start, alnum_count(piece))
             if peak > budget_mb and stop - cursor_token > 1:
                 target /= 2            # shrink the piece; never run over budget
@@ -272,7 +285,7 @@ def align_chunked(model, tokenizer, manifest, text: str, start: float, end: floa
             del wav
             piece_words = align_text(emissions, stride, tokenizer, piece)
             del emissions
-            hit_wall = (stop < len(spans) and w_end < end and piece_words
+            hit_wall = (w_end < hard_end and piece_words
                         and piece_words[-1]["end"] >= (w_end - w_start) - 2.0)
             if hit_wall and attempt < 5:
                 margin *= 2
@@ -322,6 +335,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
                     help="target narration per chunk when chunking")
     ap.add_argument("--end-margin", type=float, default=env_number("CONCORDANCE_ALIGN_END_MARGIN", 300),
                     help="extra audio past each chunk's estimated end")
+    ap.add_argument("--end-slack", type=float, default=env_number("CONCORDANCE_ALIGN_END_SLACK", 2400),
+                    help="how far past --end the last words may be sought when the "
+                         "anchor grid's group end lands early (0 restores the pre-2026-09-19 "
+                         "hard boundary)")
     ap.add_argument("--force-chunks", action="store_true",
                     help="chunk even when a single pass fits (for testing)")
     return ap.parse_args(argv)
@@ -362,13 +379,34 @@ def main(argv: list[str] | None = None) -> int:
     if chunked:
         words = align_chunked(model, tokenizer, manifest, group_text, args.start, args.end,
                               args.memory_budget_mb, args.chunk_seconds, args.end_margin,
-                              args.batch_size, stats)
+                              args.batch_size, stats, args.end_slack)
     else:
-        waveform = decode_audio(manifest, args.start, args.end)
-        emissions, stride = sliced_emissions(model, waveform, args.slice_seconds, args.batch_size)
-        del waveform
-        stats["peak_rss_after_emissions_mb"] = peak_rss_mb()
-        words = align_text(emissions, stride, tokenizer, group_text)
+        # Same short-window problem as the chunked path's last piece: `args.end`
+        # is the coarse anchor grid's guess, and if the narration runs past it
+        # the tail text has nowhere to go. Retry against a wider window, and
+        # hand over to the chunked path if that no longer fits the budget.
+        span_end, attempts = args.end, []
+        while True:
+            waveform = decode_audio(manifest, args.start, span_end)
+            emissions, stride = sliced_emissions(model, waveform, args.slice_seconds, args.batch_size)
+            del waveform
+            stats["peak_rss_after_emissions_mb"] = peak_rss_mb()
+            words = align_text(emissions, stride, tokenizer, group_text)
+            del emissions
+            attempts.append(round(span_end, 1))
+            hit_wall = (words and span_end < args.end + args.end_slack
+                        and words[-1]["end"] >= (span_end - args.start) - 2.0)
+            if not hit_wall:
+                break
+            span_end = min(args.end + args.end_slack, span_end + max(args.end_margin, 60.0))
+            if estimate_peak_mb(span_end - args.start, alnum_count(group_text)) > args.memory_budget_mb:
+                stats["mode"] = "chunked-after-wall"
+                words = align_chunked(model, tokenizer, manifest, group_text, args.start, args.end,
+                                      args.memory_budget_mb, args.chunk_seconds, args.end_margin,
+                                      args.batch_size, stats, args.end_slack)
+                break
+        if len(attempts) > 1:
+            stats["single_pass_windows"] = attempts
     stats["align_total_s"] = round(time.time() - t, 1)
     stats["peak_rss_mb"] = peak_rss_mb()
     stats["words"] = len(words)
@@ -378,7 +416,14 @@ def main(argv: list[str] | None = None) -> int:
     key = GroupKey(calibre_book_id=args.calibre_id, library_item_id=args.library_item_id,
                    fmt=args.fmt, first_spine=first, last_spine=last,
                    first_chapter=args.chapters[0], last_chapter=args.chapters[1])
-    entry = build_entry(key, item_texts, words, args.start, args.end,
+    # The words may now run past the grid's `end` (see align_chunked). Lookups
+    # gate on `audio_start <= t < audio_end`, so an entry that stopped at `end`
+    # would hold word timings it refuses to answer for. Widen to cover them;
+    # never narrow, so an entry still spans the group it was asked for.
+    covered_end = args.start + max((w["end"] for w in words), default=0.0)
+    entry_end = max(args.end, covered_end)
+    stats["audio_end_extended_s"] = round(entry_end - args.end, 1)
+    entry = build_entry(key, item_texts, words, args.start, entry_end,
                         args.book_file, None, aligner,
                         audio_fingerprint=manifest_fingerprint([path for path, _ in manifest]))
     if not args.no_save:

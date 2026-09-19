@@ -53,7 +53,8 @@ ESTIMATED_PACE = 0.5         # wall-clock seconds per second of audio, measured 
 LIBRARY_CONTAINER = "/library"
 # Worker tuning read by concordance/aligner.py inside the container; forwarded when set.
 WORKER_SETTINGS = ("CONCORDANCE_ALIGN_BUDGET_MB", "CONCORDANCE_ALIGN_CHUNK_SECONDS",
-                   "CONCORDANCE_ALIGN_END_MARGIN", "CONCORDANCE_ALIGN_BATCH_SIZE",
+                   "CONCORDANCE_ALIGN_END_MARGIN", "CONCORDANCE_ALIGN_END_SLACK",
+                   "CONCORDANCE_ALIGN_BATCH_SIZE",
                    "CONCORDANCE_ALIGNER_THREADS")
 REPO = Path(__file__).resolve().parent.parent
 

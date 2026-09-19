@@ -97,3 +97,62 @@ class UntokenizableWordTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ChunkedWindowEndTest(unittest.TestCase):
+    """The group `end` comes from the coarse anchor grid and can land early.
+
+    These drive `align_chunked` with stubs for the model, audio and alignment,
+    and a text whose last word always lands flush against the window end, which
+    is the signature of a window that stopped before the narration did.
+    """
+
+    TEXT = " ".join(f"word{i}" for i in range(12))
+
+    def _run(self, end_slack, budget_mb=1e9):
+        from concordance import aligner
+
+        windows = []
+
+        def fake_decode(manifest, w_start, w_end):
+            windows.append((w_start, w_end))
+            return w_end - w_start
+
+        def fake_emissions(model, wav, slice_seconds=0, batch_size=1):
+            return wav, 0.02
+
+        def fake_align(emissions, stride, tokenizer, piece):
+            # Every word crammed into the window, the last one flush at the wall.
+            n = len(piece.split())
+            span = emissions / max(1, n)
+            return [{"text": w, "start": i * span, "end": (i + 1) * span, "score": -0.1}
+                    for i, w in enumerate(piece.split())]
+
+        originals = (aligner.decode_audio, aligner.sliced_emissions, aligner.align_text)
+        aligner.decode_audio, aligner.sliced_emissions, aligner.align_text = (
+            fake_decode, fake_emissions, fake_align)
+        try:
+            stats = {}
+            aligner.align_chunked(None, None, [], self.TEXT, 0.0, 1000.0,
+                                  budget_mb, 400.0, 100.0, 1, stats, end_slack)
+            return windows, stats
+        finally:
+            aligner.decode_audio, aligner.sliced_emissions, aligner.align_text = originals
+
+    def test_seeks_past_the_group_end_when_the_last_words_hit_the_window_wall(self):
+        windows, _ = self._run(end_slack=600.0)
+        self.assertGreater(max(w_end for _, w_end in windows), 1000.0)
+
+    def test_never_seeks_further_than_the_slack_allows(self):
+        windows, _ = self._run(end_slack=600.0)
+        self.assertLessEqual(max(w_end for _, w_end in windows), 1600.0)
+
+    def test_keeps_the_group_end_as_a_hard_boundary_when_no_slack_is_given(self):
+        windows, _ = self._run(end_slack=0.0)
+        self.assertLessEqual(max(w_end for _, w_end in windows), 1000.0)
+
+    def test_still_claims_the_whole_group_for_the_final_piece(self):
+        # A book whose grid is accurate must behave as it did before the change:
+        # the last piece reaches `end` even though its own estimate is shorter.
+        windows, _ = self._run(end_slack=0.0)
+        self.assertEqual(max(w_end for _, w_end in windows), 1000.0)
