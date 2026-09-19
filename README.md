@@ -17,17 +17,19 @@ It's developed and used against the
 of CWA. Upstream CWA may work but hasn't been tested.
 
 **Status: early alpha, and younger than it looks.** One person's library, one
-Kobo, one Audiobookshelf instance. Writes to real books were switched on on
-2026-09-17, for two books, and there have been two unattended nightly alignment
-runs. Everything below is implemented and tested, but "tested" here means
-against one library's quirks.
+Kobo, one Audiobookshelf instance. Writes to real books were switched on
+2026-09-17, for two books, and there have been a handful of unattended nightly
+alignment runs. Everything below is implemented and tested, but "tested" here
+means against one library's quirks.
 
-Bugs found in the first two days give the flavour: the same audiobook position
+Bugs found in the first few days give the flavour: the same audiobook position
 written nine times in a row because a rounded value read as "still ahead"; every
 chapter probe on one book silently placed at the start of its search window
 because a numeric chapter heading tokenizes to nothing; one marginally-scored
-chapter acceptance dragging thirty later chapters out of place. All three are
-fixed, and all three had passing unit tests around them beforehand.
+chapter acceptance dragging thirty later chapters out of place; two of one
+book's three alignments thrown away because the chapter list put their audio
+windows ten minutes short. All four are fixed, and all four had passing unit
+tests around them beforehand.
 
 Read [Enabling writes](#enabling-writes) before letting it touch real progress,
 and enable books one at a time.
@@ -144,8 +146,19 @@ python3 -m concordance.orchestrate --run --book-id 123
 ```
 
 Each job logs one JSON line with its word count, mean score and peak memory. A
-mean score near zero is good. Below −1 means the text was matched to the wrong
-audio, and the job is logged as `aligned-low-score`.
+mean score near zero is good. Below −1 the job is logged as `aligned-low-score`
+and sync ignores the entry.
+
+A low score usually means the text was matched to the wrong audio, but not
+always. The other cause is a chapter group whose audio window ended before the
+narration did: most of the entry aligns perfectly and the last stretch gets
+crammed against the end, which drags the average down far enough to reject all
+of it. That happens when the chapter list gives a group boundary that's minutes
+off, and `CONCORDANCE_ALIGN_END_SLACK` is what lets the aligner reach past the
+boundary to find the rest. So if a job scores badly, it's worth seeing *where*
+in the entry the score collapses before concluding the mapping is wrong — an
+entry that's fine for 85% of its length and terrible at the tail is a short
+window, not a mismatch.
 
 ### Schedule it
 
@@ -311,12 +324,14 @@ day, which means the two sides disagree about which is further, and repeated
 | `CONCORDANCE_ALIGN_BUDGET_MB` | `3600` | Groups whose estimated peak exceeds this are aligned in chunks |
 | `CONCORDANCE_ALIGN_CHUNK_SECONDS` | `1500` | Narration per chunk |
 | `CONCORDANCE_ALIGN_END_MARGIN` | `300` | Extra audio after each chunk's estimated end, in seconds |
+| `CONCORDANCE_ALIGN_END_SLACK` | `2400` | How far past a group's end the last words may be sought, in seconds, when the chapter list puts that end early. `0` restores a hard boundary |
 | `CONCORDANCE_ALIGN_BATCH_SIZE` | `1` | Emission batch size; higher is a little faster and uses much more memory |
 | `CONCORDANCE_ALIGNER_THREADS` | torch default | CPU threads per job |
 | `CONCORDANCE_ALIGNER_CPU_SHARES` | `1024` | Raise (e.g. `26192`) to outrank other containers |
 | `CONCORDANCE_ALIGN_DEADLINE` | none | `HH:MM`; no alignment job starts after this time, or if it wouldn't finish by it |
 | `CONCORDANCE_ALIGN_MEMORY_WAIT` | `60` | Minutes to wait for free memory before stopping the run |
 | `CONCORDANCE_STATE_DIR` | `~/.cache/concordance` | Cache, run logs and reports |
+| `CONCORDANCE_CACHE_DIR` | `$CONCORDANCE_STATE_DIR/alignments` | Alignment cache; set separately because the aligner container mounts it at its own path |
 | `CONCORDANCE_PYTHON` | `python3` | Interpreter the cron wrappers use |
 | `CONCORDANCE_TEST_CASES` | empty | Calibre ids for `concordance --test-cases` |
 

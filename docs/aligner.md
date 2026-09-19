@@ -63,7 +63,9 @@ On the 40-minute chapter:
 - The mean word score separates right from wrong: about −0.08 for the correct
   audio and −3.2 for a passage from another chapter. `CONCORDANCE_MIN_ALIGN_SCORE`
   (default −1.0) sits between them. An entry that falls below it is ignored by
-  sync and logged as `aligned-low-score`.
+  sync and logged as `aligned-low-score`. A low score is not proof of a wrong
+  mapping, though: a truncated audio window produces one too (see *Long
+  chapters*), so check where in the entry the score collapses.
 
 ### How wrong the fallback is
 
@@ -106,6 +108,22 @@ the chapter's estimated speaking rate, aligned in an audio window with 5 minutes
 of slack at the far end (`CONCORDANCE_ALIGN_END_MARGIN`), and the next piece starts where the previous one's last
 word actually ended. If a piece's last word hits the end of its window, the
 window was too short and the piece is retried with double the slack.
+
+The group's own end gets the same treatment, because it comes from the chapter
+list rather than from a measurement, and on some books it lands minutes before
+the narration stops. A piece may reach up to `CONCORDANCE_ALIGN_END_SLACK`
+(default 2,400 s) past it. Without that the last piece is the only one that
+can't recover from a short window, since there's no following piece to push
+into, so its text ends up crammed against the boundary at several times
+narration speed and the resulting mean score rejects an entry that was correct
+for most of its length. Measured on one book, three groups went from −0.47,
+−2.79 and −1.16 to −0.09, −0.10 and −0.10 once they could reach 8 to 10 minutes
+past the ends they were given.
+
+A retry re-decodes and re-aligns its piece, so a book whose chapter list is
+accurate pays nothing and one with badly placed boundaries pays 15% to 45% more
+wall-clock. The stored entry's end widens to cover whatever it found, so the
+extra words are actually reachable when a position is looked up.
 
 Forcing a 40-minute chapter into 10-minute pieces gave the same 5,724 words as a
 single pass: median difference 0.00 s, largest 0.46 s, four words over 0.1 s.

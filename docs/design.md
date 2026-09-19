@@ -72,6 +72,21 @@ refinements came from real failures:
 Across 102 pairs this took confident mappings from 48 to 91 and unusable ones
 from 13 to 4.
 
+**The matcher's text atom is the spine file, which caps how fine it can get.**
+A book whose ebook packs a whole part into one file gives the matcher nine
+boundary pairs no matter how good the audio chapter list is, and its confidence
+score won't reflect that: coverage is measured against the smaller of the two
+side's counts, so it reports a contented 1.0 while being as coarse as ever.
+Measured on one such book, positions derived from that grid sat about 530 s from
+the truth, against 4–17 s for books where each spine file is one chapter. Two
+things follow. Alignment is what rescues these books, since it doesn't use the
+grid. And the grid also sets the audio window each alignment job is given, so a
+badly placed boundary can truncate a job (see
+[aligner.md](aligner.md), *Long chapters*). Cutting spine files at detected
+chapter starts would fix the grid directly; it was measured and not built,
+because only four books in one library were affected and none of them was being
+written to.
+
 **KEPUB and EPUB spines differ.** kepubify inserts a title-page dummy at spine
 position 1 in some KEPUBs, which puts every KEPUB index one past the EPUB's.
 Concordance builds the chapter map from the file the Kobo reads (taken from the
@@ -91,9 +106,15 @@ Positions come in tiers, most precise first:
 | `finished` | Either side's own definition of finished | yes |
 
 Interpolation within a chapter was measured at 17 s mean and 37 s worst error on
-a 40-minute chapter, always late. Alignment brings that to about a word. Only
-the precise tiers are written, because a chapter start can be tens of minutes
-from where you are.
+a 40-minute chapter. Measured again across five segments in three books, the
+error scales with the segment rather than with the book — about 2% of its length
+in the worst case — and its direction is not predictable. One book ran 17 s late
+on average, another a few seconds early, a third wandered ±97 s inside one
+segment. An earlier version of this note said interpolation was always late,
+which held for the single chapter it had been measured on and not in general, so
+a constant correction tuned on one book would make another worse. Alignment
+brings the error to about a word. Only the precise tiers are written, because a
+chapter start can be tens of minutes from where you are.
 
 ## Deciding direction
 
