@@ -105,11 +105,16 @@ def decide(
         return Decision("to_cwa", "audiobook finished", tier="finished",
                         cwa_percentage=100.0, cwa_spine_index=last, cwa_finished=True)
 
+    # A side sitting at exactly 0 is "no progress" above, but its record still
+    # exists and still stores what was last written to it. Pass the floor anyway,
+    # or a target that rounds or rewinds to 0 is rewritten on every sync.
     if has_cwa and not has_abs:
         return _to_abs(cwa, alignment, rewind_seconds, book_duration, "only the ebook has progress",
+                       floor=listening.current_time if listening is not None else None,
                        item_fraction=item_fraction, aligned_time=aligned_ebook_time)
     if has_abs and not has_cwa:
         return _to_cwa(listening, alignment, "only the audiobook has progress",
+                       floor=cwa.percentage if cwa is not None else None,
                        aligned=aligned_audio_fraction)
 
     # Where the ebook sits, for the "has the ebook already got there" check on

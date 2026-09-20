@@ -127,6 +127,40 @@ class RepeatedWriteTest(unittest.TestCase):
         self.assertEqual(d.direction, "to_abs")
 
 
+class FirstProgressFloorTest(unittest.TestCase):
+    """A side stored at exactly 0 is not "no progress" for floor purposes.
+
+    Early in a book the rewind clamps the translated ebook position to 0. The
+    audiobook then stores 0, which reads as absent, so the branch for "only the
+    ebook has progress" ran without a floor and rewrote 0 on every sync.
+    """
+
+    def test_does_not_write_a_zero_audio_position_the_rewind_clamped(self):
+        d = decide(ebook(1, 0.7), audio(0.0), ALIGNMENT, rewind_seconds=150,
+                   book_duration=DURATION, item_fraction=0.02)
+        self.assertEqual(d.direction, "in_sync")
+
+    def test_writes_once_the_ebook_moves_past_the_rewind(self):
+        d = decide(ebook(1, 17.0), audio(0.0), ALIGNMENT, rewind_seconds=150,
+                   book_duration=DURATION, item_fraction=0.5)
+        self.assertEqual(d.direction, "to_abs")
+
+    def test_still_writes_to_a_fresh_audiobook_with_no_progress_record(self):
+        d = decide(ebook(2, 45.0), None, ALIGNMENT, rewind_seconds=150,
+                   book_duration=DURATION, item_fraction=0.5)
+        self.assertEqual(d.direction, "to_abs")
+
+    def test_stops_rewriting_an_ebook_position_that_translates_below_the_margin(self):
+        again = decide(ebook(1, 0.0), audio(5.0), ALIGNMENT, rewind_seconds=0,
+                       book_duration=DURATION, item_fraction=0.0)
+        self.assertEqual(again.direction, "in_sync")
+
+    def test_still_writes_to_an_ebook_sitting_at_zero_when_the_audio_is_well_ahead(self):
+        d = decide(ebook(1, 0.0), audio(1900.0), ALIGNMENT, rewind_seconds=0,
+                   book_duration=DURATION, item_fraction=0.0)
+        self.assertEqual(d.direction, "to_cwa")
+
+
 class AlreadyFurtherTest(unittest.TestCase):
     """The ebook-side guard behind the CWA floor.
 
