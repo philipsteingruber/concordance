@@ -366,7 +366,7 @@ day, which means the two sides disagree about which is further, and repeated
 | `CONCORDANCE_ALIGNER_IMAGE` | `concordance-aligner:latest` | Aligner image |
 | `CONCORDANCE_ALIGNER_MEMORY` | `4g` | Container memory limit |
 | `CONCORDANCE_ALIGN_MIN_FREE_MB` | `5000` | Start a job only while this much memory is available |
-| `CONCORDANCE_ALIGN_LOOKAHEAD` | `2` | Chapter groups past your position to align |
+| `CONCORDANCE_ALIGN_LOOKAHEAD_MINUTES` | `120` | Audio minutes past your current chapter group to keep aligned |
 | `CONCORDANCE_MIN_CHAPTER_SECONDS` | `60` | Shortest chapter `concordance-chapters` will mark |
 | `CONCORDANCE_CHAPTER_MIN_SCORE` | `-0.5` | Score a located chapter must beat to be trusted as an anchor |
 | `CONCORDANCE_ALIGN_BUDGET_MB` | `3600` | Groups whose estimated peak exceeds this are aligned in chunks |

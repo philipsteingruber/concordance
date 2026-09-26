@@ -12,7 +12,7 @@ from concordance.cache import GroupKey
 from concordance.config import Config, ConfigError
 from concordance.orchestrate import (Job, aligner_stats, alignment_status, current_group_index, docker_command,
                                      fits_before_deadline, group_span, in_progress, memory_wait_until,
-                                     no_group_reason, parse_deadline, select_groups)
+                                     no_group_reason, order_jobs, parse_deadline, select_groups)
 
 # Four equal 1000 s chapters, four equal spine items (5-8): a clean 1:1 book.
 SPINE = [SpineItem(index=i, href=f"c{i}.xhtml", chars=20_000) for i in (5, 6, 7, 8)]
@@ -30,14 +30,51 @@ class GroupSelectionTest(unittest.TestCase):
     def test_picks_the_further_group_when_audio_is_ahead_of_the_ebook(self):
         self.assertEqual(current_group_index(ALIGNMENT, ebook_spine=5, audio_time=3500.0), 3)
 
-    def test_queues_the_current_group_and_the_lookahead_groups(self):
-        self.assertEqual(select_groups(ALIGNMENT, 6, None, lookahead=2), [1, 2, 3])
+    def test_adds_following_groups_until_their_audio_covers_the_lookahead(self):
+        # 1000 s groups against a 1200 s target: one group falls short, two cover it.
+        self.assertEqual(select_groups(ALIGNMENT, 5, None, lookahead_minutes=20), [0, 1, 2])
+
+    def test_stops_at_the_group_that_reaches_the_lookahead_exactly(self):
+        chapters = [Chapter(index=i, title=str(i), start=(i - 1) * 600.0, end=i * 600.0) for i in (1, 2, 3, 4)]
+        alignment = build_alignment(SPINE, chapters)
+        self.assertEqual(select_groups(alignment, 5, None, lookahead_minutes=10), [0, 1])
+
+    def test_takes_one_long_group_that_alone_exceeds_the_lookahead(self):
+        # Text and audio in the same 1:19:1 proportion, so each chapter is its own group.
+        spine = [SpineItem(index=i, href=f"c{i}.xhtml", chars=c) for i, c in ((5, 2_000), (6, 38_000), (7, 2_000))]
+        long_chapters = [Chapter(index=1, title="1", start=0.0, end=1000.0),
+                         Chapter(index=2, title="2", start=1000.0, end=20_000.0),
+                         Chapter(index=3, title="3", start=20_000.0, end=21_000.0)]
+        alignment = build_alignment(spine, long_chapters)
+        self.assertEqual(len(alignment.groups), 3)
+        self.assertEqual(select_groups(alignment, 5, None, lookahead_minutes=20), [0, 1])
+
+    def test_queues_only_the_current_group_with_no_lookahead(self):
+        self.assertEqual(select_groups(ALIGNMENT, 6, None, lookahead_minutes=0), [1])
 
     def test_stops_the_lookahead_at_the_last_group(self):
-        self.assertEqual(select_groups(ALIGNMENT, 8, None, lookahead=2), [3])
+        self.assertEqual(select_groups(ALIGNMENT, 7, None, lookahead_minutes=600), [2, 3])
+
+    def test_counts_the_lookahead_from_the_further_of_the_two_positions(self):
+        self.assertEqual(select_groups(ALIGNMENT, 5, 2500.0, lookahead_minutes=10), [2, 3])
 
     def test_queues_nothing_when_no_position_falls_in_a_group(self):
-        self.assertEqual(select_groups(ALIGNMENT, None, None, lookahead=2), [])
+        self.assertEqual(select_groups(ALIGNMENT, None, None, lookahead_minutes=120), [])
+
+
+class JobOrderTest(unittest.TestCase):
+    def job(self, title, reason):
+        return Job(title, GroupKey(1, "item", "kepub", 1, 1, 1, 1), "", 0.0, 1.0, [], reason)
+
+    def test_runs_every_books_current_group_before_any_lookahead(self):
+        jobs = [self.job("A", "current"), self.job("A", "lookahead"), self.job("B", "current")]
+        self.assertEqual([j.reason for j in order_jobs(jobs)], ["current", "current", "lookahead"])
+
+    def test_keeps_planning_order_within_the_lookahead(self):
+        jobs = [self.job("A", "current"), self.job("A", "lookahead"), self.job("B", "current"),
+                self.job("B", "lookahead"), self.job("A2", "lookahead")]
+        lookahead = [j.title for j in order_jobs(jobs) if j.reason == "lookahead"]
+        self.assertEqual(lookahead, ["A", "B", "A2"])
 
 
 class NoGroupReasonTest(unittest.TestCase):

@@ -1,9 +1,11 @@
 """Nightly alignment orchestrator: decide which chapter groups to align, then run them.
 
 For every in-progress pair it finds the chapter group the reader is in (the
-further of the ebook and audiobook positions) and queues that group plus the
-next `--lookahead` groups, skipping any with a fresh cache entry. Jobs run one
-at a time in the aligner container, and each is guarded:
+further of the ebook and audiobook positions) and queues that group plus enough
+following groups to cover `--lookahead-minutes` of audio, skipping any with a
+fresh cache entry. Every book's current group is queued ahead of any lookahead,
+so one book's lookahead can't spend the night before another's current group
+runs. Jobs run one at a time in the aligner container, and each is guarded:
 
 * **memory:** a job starts only if MemAvailable >= `--min-free-mb` (default
   5,000). Otherwise it rechecks every `--recheck-minutes` for up to
@@ -103,11 +105,28 @@ def current_group_index(alignment: Alignment, ebook_spine: int | None,
 
 
 def select_groups(alignment: Alignment, ebook_spine: int | None, audio_time: float | None,
-                  lookahead: int) -> list[int]:
+                  lookahead_minutes: float) -> list[int]:
+    """The current group, then following groups until their audio covers the lookahead.
+
+    Counted in audio rather than groups because a group's length varies by book:
+    two groups were ~30 min in one book and ~7 h in another.
+    """
     current = current_group_index(alignment, ebook_spine, audio_time)
     if current is None:
         return []
-    return list(range(current, min(current + 1 + lookahead, len(alignment.groups))))
+    indices, ahead = [current], 0.0
+    for i in range(current + 1, len(alignment.groups)):
+        if ahead >= lookahead_minutes * 60:
+            break
+        start, end = group_span(alignment, i)
+        indices.append(i)
+        ahead += end - start
+    return indices
+
+
+def order_jobs(jobs: list[Job]) -> list[Job]:
+    """Every book's current group first, then the lookahead, each in planning order."""
+    return sorted(jobs, key=lambda job: job.reason != "current")
 
 
 def no_group_reason(alignment: Alignment, ebook_spine: int | None, audio_time: float | None) -> str:
@@ -159,7 +178,7 @@ def in_progress(cwa: CwaProgress | None, listening: AbsProgress | None) -> bool:
     return ebook or audio
 
 
-def plan_jobs(cfg: Config, lookahead: int, only: set[int] | None, log) -> list[Job]:
+def plan_jobs(cfg: Config, lookahead_minutes: float, only: set[int] | None, log) -> list[Job]:
     cwa = CwaClient(cfg.cwa_url, cfg.cwa_user, cfg.cwa_password)
     abs_client = AbsClient(cfg.abs_url, cfg.abs_api_key)
     books = load_books(cfg.calibre_db, cfg.calibre_root)
@@ -204,7 +223,7 @@ def plan_jobs(cfg: Config, lookahead: int, only: set[int] | None, log) -> list[J
             continue
 
         audio_time = audio.current_time if audio else None
-        indices = select_groups(alignment, spine, audio_time, lookahead)
+        indices = select_groups(alignment, spine, audio_time, lookahead_minutes)
         if not indices:
             log({"book": pair.calibre.title, "status": "skipped",
                  "reason": no_group_reason(alignment, spine, audio_time)})
@@ -227,7 +246,7 @@ def plan_jobs(cfg: Config, lookahead: int, only: set[int] | None, log) -> list[J
             start, end = group_span(alignment, i)
             jobs.append(Job(pair.calibre.title, key, str(book_file), start, end, manifest,
                             "current" if i == indices[0] else "lookahead"))
-    return jobs
+    return order_jobs(jobs)
 
 
 def aligner_stats(stdout: str) -> dict:
@@ -337,8 +356,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(prog="concordance.orchestrate",
                                  description="Plan (and with --run, execute) nightly alignment jobs.")
     ap.add_argument("--run", action="store_true", help="actually start aligner containers")
-    ap.add_argument("--lookahead", type=int, default=int(env_number("CONCORDANCE_ALIGN_LOOKAHEAD", 2, int)),
-                    help="chapter groups past the current one to align")
+    ap.add_argument("--lookahead-minutes", type=float,
+                    default=env_number("CONCORDANCE_ALIGN_LOOKAHEAD_MINUTES", 120),
+                    help="audio minutes past the current group to keep aligned")
     ap.add_argument("--book-id", type=int, action="append", default=[])
     ap.add_argument("--planned-only", action="store_true",
                     help="print only the groups that will run, not skipped or already-fresh ones "
@@ -354,8 +374,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
                     default=env_number("CONCORDANCE_ALIGN_MEMORY_WAIT", 60),
                     help="how long to wait for free memory before stopping the run")
     args = ap.parse_args(argv)
-    if args.min_free_mb < 0 or args.lookahead < 0:
-        ap.error("--min-free-mb and --lookahead must not be negative")
+    if args.min_free_mb < 0 or args.lookahead_minutes < 0:
+        ap.error("--min-free-mb and --lookahead-minutes must not be negative")
     return args
 
 
@@ -383,7 +403,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         deadline = parse_deadline(args.deadline, datetime.now())
         cfg = Config.from_env()
-        jobs = plan_jobs(cfg, args.lookahead, set(args.book_id) or None, log)
+        jobs = plan_jobs(cfg, args.lookahead_minutes, set(args.book_id) or None, log)
     except ServiceUnavailable as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 3

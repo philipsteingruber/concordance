@@ -132,8 +132,11 @@ single pass: median difference 0.00 s, largest 0.46 s, four words over 0.1 s.
 
 `python3 -m concordance.orchestrate --run` (see `scripts/cron-align.sh`):
 
-- Plans each in-progress book's current chapter group and the next two
-  (`CONCORDANCE_ALIGN_LOOKAHEAD`). A dry run lists the plan; `--planned-only`
+- Plans each in-progress book's current chapter group, then following groups
+  until they cover 120 minutes of audio (`CONCORDANCE_ALIGN_LOOKAHEAD_MINUTES`).
+  Counting audio rather than groups keeps the lookahead the same across books
+  whose groups run from ten minutes to several hours. Every book's current group
+  is queued before any lookahead. A dry run lists the plan; `--planned-only`
   hides books that are skipped or already aligned, skipping groups with a fresh cache entry. An entry goes stale
   when the book file or any audio file changes size or modification time.
 - Starts a job only when at least 5,000 MB is available (`CONCORDANCE_ALIGN_MIN_FREE_MB`),
