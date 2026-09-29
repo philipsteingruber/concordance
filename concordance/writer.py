@@ -15,7 +15,9 @@ Payload rules, each learned the hard way (see docs/design.md):
 
 * **CWA** `PUT /kosync/syncs/progress`: `percentage` is a 0-1 fraction (the
   server multiplies values <= 1.0 by 100), written `CWA_PERCENT_MARGIN` points
-  low so the Kobo's own subsequent pushes aren't rejected as "behind". `progress` is a real XPointer built
+  low so the Kobo's own subsequent pushes aren't rejected as "behind", but never
+  below what CWA already stores: CWA keeps the higher percentage from another
+  device and still answers 200, so a lower write is silently dropped. `progress` is a real XPointer built
   for the file format the Kobo has open (a KEPUB path fails against the EPUB and
   vice versa). The device name is `concordance`, distinct from the Kobo, so
   KOSync's same-device-rewind rule can never let Concordance move the Kobo's own
@@ -37,6 +39,12 @@ from .decide import Decision
 from .xpointer import Document, parse_document, spine_documents, to_xpointer
 
 DEVICE_NAME = "concordance"
+# Percentage points to write above CWA's stored value when the margin would land
+# at or below it. The KOReader plugin floors both percentages to 0.01 points
+# (Math.roundPercent) and treats equal ones as "already synchronized", so the step
+# must clear that grid; the extra 0.001 absorbs float error. Still far below a
+# page, so the Kobo's next push after jumping here reads as ahead.
+CWA_ACCEPT_STEP = 0.011
 DEFAULT_WRITE_TIERS = ("aligned", "interpolated", "finished")
 
 
@@ -111,7 +119,10 @@ def plan_cwa_write(decision: Decision, calibre_book_id: int, book_dir: Path,
                                 blocked_by=["no resolvable position"])
         doc = parse_document(items[spine])
         xpointer = to_xpointer(doc, spine, _nonspace_offset(doc, decision.cwa_item_fraction))
-        percentage = round(max(0.0, (decision.cwa_percentage or 0.0) - CWA_PERCENT_MARGIN) / 100.0, 6)
+        percentage = max(0.0, (decision.cwa_percentage or 0.0) - CWA_PERCENT_MARGIN)
+        if decision.cwa_stored_percentage is not None:
+            percentage = max(percentage, decision.cwa_stored_percentage + CWA_ACCEPT_STEP)
+        percentage = round(percentage / 100.0, 6)
         description = f"{percentage * 100:.1f}% at DocFragment[{spine}] ({fmt})"
 
     payload = {"document": str(calibre_book_id), "progress": xpointer, "percentage": percentage,

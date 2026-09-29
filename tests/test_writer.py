@@ -51,6 +51,16 @@ class CwaPlanTest(unittest.TestCase):
                      cwa_item_fraction=0.5)
         self.assertEqual(plan_cwa_write(d, 7, self.dir, "kepub").payload["percentage"], 0.405)
 
+    def test_writes_just_above_cwas_stored_percentage_when_the_margin_would_fall_below_it(self):
+        d = Decision("to_cwa", "r", tier="aligned", cwa_percentage=3.17, cwa_spine_index=2,
+                     cwa_item_fraction=0.5, cwa_stored_percentage=1.18)
+        self.assertEqual(plan_cwa_write(d, 7, self.dir, "kepub").payload["percentage"], 0.01191)
+
+    def test_keeps_the_margin_when_it_already_lands_above_cwas_stored_percentage(self):
+        d = Decision("to_cwa", "r", tier="interpolated", cwa_percentage=42.5, cwa_spine_index=2,
+                     cwa_item_fraction=0.5, cwa_stored_percentage=30.0)
+        self.assertEqual(plan_cwa_write(d, 7, self.dir, "kepub").payload["percentage"], 0.405)
+
     def test_never_writes_a_percentage_below_zero(self):
         d = Decision("to_cwa", "r", tier="interpolated", cwa_percentage=1.0, cwa_spine_index=2,
                      cwa_item_fraction=0.01)

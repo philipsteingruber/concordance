@@ -68,6 +68,7 @@ class Decision:
     cwa_spine_index: int | None = None      # to_cwa: DocFragment[N] to write
     cwa_finished: bool = False              # to_cwa: mark finished
     cwa_item_fraction: float | None = None  # to_cwa: fraction through the spine item
+    cwa_stored_percentage: float | None = None  # to_cwa: what CWA holds now, 0-100
 
 
 def decide(
@@ -214,6 +215,19 @@ def _already_further(spine: int, fraction: float, ebook_spine: int | None,
     return fraction <= ebook_fraction + 0.001
 
 
+def _ebook_has_reached(spine: int, fraction: float, pct: float, floor: float | None,
+                       ebook_spine: int | None, ebook_fraction: float | None) -> bool:
+    """Whether a write toward the ebook would not move it forward.
+
+    The resolved position decides whenever the ebook's is known. The percentage
+    floor is only the fallback: its tolerance is the whole CWA_PERCENT_MARGIN, so
+    on its own it swallows up to that many points of real listening progress.
+    """
+    if ebook_spine is not None and ebook_fraction is not None:
+        return _already_further(spine, fraction, ebook_spine, ebook_fraction)
+    return floor is not None and pct <= floor + FLOOR_TOLERANCE_PERCENT
+
+
 def _to_cwa(listening: AbsProgress, alignment: Alignment, reason: str,
             floor: float | None = None, aligned: tuple[int, float] | None = None,
             ebook_spine: int | None = None, ebook_fraction: float | None = None) -> Decision:
@@ -222,19 +236,22 @@ def _to_cwa(listening: AbsProgress, alignment: Alignment, reason: str,
         point = next((p for p in alignment.points if p.spine_index == spine), None)
         if point is not None and alignment.total_chars > 0:
             pct = 100.0 * (point.text_start + fraction * point.text_chars) / alignment.total_chars
-            if _already_further(spine, fraction, ebook_spine, ebook_fraction) or (
-                    floor is not None and pct <= floor + FLOOR_TOLERANCE_PERCENT):
+            if _ebook_has_reached(spine, fraction, pct, floor, ebook_spine, ebook_fraction):
                 return Decision("in_sync", f"{reason}, but the ebook is already at or past that point",
                                 tier="aligned")
             return Decision("to_cwa", reason, tier="aligned", cwa_percentage=pct,
-                            cwa_spine_index=spine, cwa_item_fraction=fraction)
+                            cwa_spine_index=spine, cwa_item_fraction=fraction,
+                            cwa_stored_percentage=floor)
     pct, spine, tier = audio_to_ebook(listening.current_time, alignment)
     if tier == "none":
         return Decision("none", "no translatable audiobook position")
     located = audio_item_fraction(listening.current_time, alignment)
-    if (located is not None and _already_further(located[0], located[1], ebook_spine, ebook_fraction)) or (
-            floor is not None and pct <= floor + FLOOR_TOLERANCE_PERCENT):
+    if located is not None:
+        reached = _ebook_has_reached(located[0], located[1], pct, floor, ebook_spine, ebook_fraction)
+    else:
+        reached = floor is not None and pct <= floor + FLOOR_TOLERANCE_PERCENT
+    if reached:
         return Decision("in_sync", f"{reason}, but the ebook is already at or past that point",
                         tier=tier)
     return Decision("to_cwa", reason, tier=tier, cwa_percentage=pct, cwa_spine_index=spine,
-                    cwa_item_fraction=located[1] if located else None)
+                    cwa_item_fraction=located[1] if located else None, cwa_stored_percentage=floor)

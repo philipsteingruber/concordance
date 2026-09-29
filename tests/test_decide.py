@@ -161,6 +161,33 @@ class FirstProgressFloorTest(unittest.TestCase):
         self.assertEqual(d.direction, "to_cwa")
 
 
+class ResolvedEbookFloorTest(unittest.TestCase):
+    """With the ebook's position resolved, the exact check decides, not the percentage.
+
+    The percentage floor's tolerance is the whole CWA_PERCENT_MARGIN, so on its own
+    it held back up to that many points of listening: Green-Eyed Monster sat half
+    an hour of audio behind in the ebook without a write.
+    """
+
+    def test_writes_an_aligned_audio_lead_smaller_than_the_percent_margin(self):
+        d = decide(ebook(2, 35.0), audio(1100.0), ALIGNMENT, 0, DURATION, item_fraction=0.05,
+                   aligned_ebook_time=1050.0, aligned_audio_fraction=(2, 0.1))
+        self.assertEqual(d.direction, "to_cwa")
+
+    def test_writes_an_audio_lead_into_the_next_chapter_smaller_than_the_percent_margin(self):
+        d = decide(ebook(1, 33.0), audio(1020.0), ALIGNMENT, 0, DURATION, item_fraction=0.99)
+        self.assertEqual(d.direction, "to_cwa")
+
+    def test_carries_the_ebooks_stored_percentage_for_the_writer(self):
+        d = decide(ebook(2, 35.0), audio(1100.0), ALIGNMENT, 0, DURATION, item_fraction=0.05,
+                   aligned_ebook_time=1050.0, aligned_audio_fraction=(2, 0.1))
+        self.assertEqual(d.cwa_stored_percentage, 35.0)
+
+    def test_falls_back_to_the_percentage_floor_without_a_resolved_offset(self):
+        d = decide(ebook(1, 33.0), audio(1020.0), ALIGNMENT, 0, DURATION, item_fraction=None)
+        self.assertNotEqual(d.direction, "to_cwa")
+
+
 class AlreadyFurtherTest(unittest.TestCase):
     """The ebook-side guard behind the CWA floor.
 
