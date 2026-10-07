@@ -83,6 +83,21 @@ class CwaPlanTest(unittest.TestCase):
         d = Decision("to_cwa", "r", tier="finished", cwa_finished=True)
         self.assertEqual(plan_cwa_write(d, 7, self.dir, "kepub").payload["percentage"], 1.0)
 
+    def test_keys_a_finished_write_by_the_koreader_checksum_so_cwa_mirrors_it(self):
+        d = Decision("to_cwa", "r", tier="finished", cwa_finished=True)
+        plan = plan_cwa_write(d, 7, self.dir, "kepub", checksum="abc123")
+        self.assertEqual(plan.payload["document"], "abc123")
+
+    def test_keys_a_finished_write_by_book_id_when_no_checksum_is_known(self):
+        d = Decision("to_cwa", "r", tier="finished", cwa_finished=True)
+        self.assertEqual(plan_cwa_write(d, 7, self.dir, "kepub").payload["document"], "7")
+
+    def test_keeps_mid_book_writes_on_the_book_id_even_when_a_checksum_is_known(self):
+        d = Decision("to_cwa", "r", tier="interpolated", cwa_percentage=42.5, cwa_spine_index=2,
+                     cwa_item_fraction=0.5)
+        plan = plan_cwa_write(d, 7, self.dir, "kepub", checksum="abc123")
+        self.assertEqual(plan.payload["document"], "7")
+
     def test_blocks_the_write_when_no_spine_position_is_known(self):
         d = Decision("to_cwa", "r", tier="percentage", cwa_percentage=40.0)
         self.assertFalse(plan_cwa_write(d, 7, self.dir, "kepub").allowed)

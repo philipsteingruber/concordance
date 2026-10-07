@@ -116,6 +116,32 @@ def load_books(db_path: str, root: str) -> dict[int, CalibreBook]:
     }
 
 
+def koreader_checksum(db_path: str, book_id: int, fmt: str | None) -> str | None:
+    """A KOReader partial-MD5 checksum CWA has stored for this book, or None.
+
+    CWA keeps them in `book_format_checksums` (version `koreader` is the content
+    hash; `koreader_filename` is a filename-based variant). A KOSync write keyed
+    by one resolves to the Calibre book, so CWA mirrors it onto the Kobo bookmark
+    and read status; a numeric key doesn't. Every checksum of the book resolves
+    to the same book; the open format's newest is preferred.
+    """
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT checksum FROM book_format_checksums WHERE book = ? AND version = 'koreader' "
+            "ORDER BY upper(format) = upper(?) DESC, created DESC LIMIT 1",
+            (book_id, fmt or "kepub"),
+        ).fetchone()
+    except sqlite3.Error:
+        return None  # no checksum table (older CWA): fall back to the numeric key
+    finally:
+        conn.close()
+    return row[0] if row else None
+
+
 def spine_file(book: CalibreBook, fmt: str | None) -> tuple[str, Path] | None:
     """The (format, file) whose spine positions should be used for this book.
 

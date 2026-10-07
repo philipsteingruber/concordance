@@ -18,14 +18,14 @@ import dataclasses
 
 from .absclient import AbsClient
 from .anchor import build_alignment
-from .calibre import load_books, read_spine, spine_file
+from .calibre import koreader_checksum, load_books, read_spine, spine_file
 from .config import Config, ConfigError, ServiceUnavailable
 from .cwa import CwaClient
 from .matching import load_calibre_isbns, match_pairs
 from .report import PairReport, Report, render_table, write_artifacts
 from .cache import AlignmentCache, manifest_fingerprint
 from .decide import decide
-from .writer import WritePolicy, gate, plan_abs_write, plan_cwa_write
+from .writer import DEVICE_NAME, WritePolicy, gate, plan_abs_write, plan_cwa_write
 from .xpointer import XPointerError, resolve_any
 
 def test_case_ids() -> set[int]:
@@ -229,7 +229,10 @@ def build_report(cfg: Config, only: set[int] | None, progress_only: bool,
                 entry.would_write_cwa_percentage = round(decision.cwa_percentage, 2)
 
         plan = (plan_abs_write(decision, book_id, audiobook.duration)
-                or plan_cwa_write(decision, book_id, pair.calibre.path, entry.cwa_format))
+                or plan_cwa_write(decision, book_id, pair.calibre.path, entry.cwa_format,
+                                  checksum=(koreader_checksum(cfg.calibre_db, book_id,
+                                                              entry.cwa_format)
+                                            if decision.cwa_finished else None)))
         if plan is not None:
             gate(plan, decision, policy)
             entry.planned_write = f"{plan.target}: {plan.description}"
@@ -241,6 +244,14 @@ def build_report(cfg: Config, only: set[int] | None, progress_only: bool,
                         pair.audiobook.library_item_id, plan.payload)
                 else:
                     entry.write_status = cwa.put_progress(plan.payload)
+                    if decision.cwa_finished and 200 <= entry.write_status < 300:
+                        # The progress PUT only moves kosync_progress; this flips the
+                        # read status CWA's book page (and anything reading its bookmark) shows. Its
+                        # status replaces the progress PUT's, so a failure here surfaces
+                        # as a non-2xx write: the next sync sees both sides finished and
+                        # won't retry.
+                        entry.write_status = cwa.put_read_status(book_id, "finished", DEVICE_NAME)
+                        entry.planned_write += " + read status"
 
         report.pairs.append(entry)
 

@@ -96,7 +96,14 @@ def _nonspace_offset(doc: Document, fraction: float) -> int:
 
 
 def plan_cwa_write(decision: Decision, calibre_book_id: int, book_dir: Path,
-                   kobo_format: str | None) -> PlannedWrite | None:
+                   kobo_format: str | None, checksum: str | None = None) -> PlannedWrite | None:
+    """Plan a KOSync progress write.
+
+    `checksum` (calibre.koreader_checksum) keys a *finished* write by the file's
+    KOReader checksum so CWA mirrors it onto the Kobo bookmark: the book page then
+    shows 100% and finished. Mid-book writes stay on the numeric key on purpose;
+    mirroring them would let a Concordance position block the Kobo's own pushes.
+    """
     if decision.direction != "to_cwa":
         return None
     chosen = _book_file(book_dir, kobo_format)
@@ -106,7 +113,9 @@ def plan_cwa_write(decision: Decision, calibre_book_id: int, book_dir: Path,
     fmt, path = chosen
     items = spine_documents(path)
 
+    document = str(calibre_book_id)
     if decision.cwa_finished:
+        document = checksum or document
         spine = max(items)
         doc = parse_document(items[spine])
         xpointer = to_xpointer(doc, spine, max(len(doc.text) - 1, 0))
@@ -125,7 +134,7 @@ def plan_cwa_write(decision: Decision, calibre_book_id: int, book_dir: Path,
         percentage = round(percentage / 100.0, 6)
         description = f"{percentage * 100:.1f}% at DocFragment[{spine}] ({fmt})"
 
-    payload = {"document": str(calibre_book_id), "progress": xpointer, "percentage": percentage,
+    payload = {"document": document, "progress": xpointer, "percentage": percentage,
                "device": DEVICE_NAME, "device_id": DEVICE_NAME}
     return PlannedWrite("cwa", calibre_book_id, payload, description)
 

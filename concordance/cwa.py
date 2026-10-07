@@ -118,6 +118,26 @@ class CwaClient:
             raise RuntimeError(f"CWA progress PUT failed: {exc}") from exc
         return resp.status_code
 
+    def put_read_status(self, calibre_book_id: int, status: str, device: str) -> int:
+        """PUT an explicit read status ("unread" | "reading" | "finished"); returns the HTTP status.
+
+        A numeric-document progress PUT never reaches the Kobo bookmark or
+        `book_read_link` (no checksum to resolve), so CWA's book page would
+        keep showing the Kobo's last push after a finish.
+        "finished" here runs the website's own mark-read
+        (`helper.edit_book_read_status`), which accepts the Calibre id directly.
+        """
+        payload = {"book_id": calibre_book_id, "status": status,
+                   "device": device, "device_id": device}
+        try:
+            resp = self._session.put(f"{self._base}/kosync/syncs/read_status", json=payload,
+                                     timeout=self._timeout)
+        except requests.RequestException as exc:
+            if unreachable(exc):
+                raise ServiceUnavailable(f"CWA unreachable at {self._base}: {exc}") from exc
+            raise RuntimeError(f"CWA read status PUT failed: {exc}") from exc
+        return resp.status_code
+
     def export(self) -> list[CwaProgress]:
         """Return progress for every book CWA resolved to a Calibre id.
 
