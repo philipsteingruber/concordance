@@ -44,6 +44,9 @@ _HEADING = re.compile(rb"(?is)<h[1-6][^>]*>(.*?)</h[1-6]>")
 NEVER_NARRATED_HEADINGS = frozenset({
     "copyright", "contents", "table of contents", "cover", "title page",
     "also by this author", "about the publisher",
+    # Non-fiction back matter. Sisters of Scandal declares no role for either,
+    # and together they are ~18% of its text (see anchor.build_alignment).
+    "bibliography", "image credits",
 })
 
 

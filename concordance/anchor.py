@@ -274,7 +274,14 @@ def trim_unnarrated_edges(items: list[SpineItem]) -> list[SpineItem]:
 
 def build_alignment(spine: list[SpineItem], chapters: list[Chapter]) -> Alignment:
     """Align content spine items to substantive chapters by matching boundaries."""
-    content = [item for item in spine if item.is_content]
+    # Never-narrated items at the book's ends are left out of the match, not just
+    # trimmed from a group afterwards. Back matter heavier than a chapter is
+    # cheaper for the matcher to absorb than to skip when the chapters are of
+    # similar length: Sisters of Scandal's bibliography and image credits (62,000
+    # chars, ~18% of the text) took the last three audio chapters and pulled every
+    # earlier group up to three chapters early. Interior items stay, for the reason
+    # trim_unnarrated_edges gives.
+    content = trim_unnarrated_edges([item for item in spine if item.is_content])
     chapter_mins = [c.duration / 60.0 for c in chapters] or [0.0]
     median_ch = statistics.median(chapter_mins)
     max_ch = max(chapter_mins)
