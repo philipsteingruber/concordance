@@ -60,25 +60,37 @@ def _aligned_positions(cfg, cache, abs_client, pair, located, listening):
         book = sorted(pair.calibre.path.glob(f"*.{entry.key.fmt}"))
         return bool(book) and entry.is_fresh(book[0], audio_print, entry.aligner)
 
-    fresh_entries = [e for e in entries if fresh(e)]
+    return lookup_aligned([e for e in entries if fresh(e)], located,
+                          listening.current_time if listening is not None else None,
+                          cfg.min_align_score)
+
+
+def lookup_aligned(entries, located, current_time, min_score):
+    """The first passing entry for each side; a low-scoring one never ends the search.
+
+    Two entries can cover the same position: after a matcher fix re-keys a book's
+    groups, the old entries stay on disk and stay fresh. Stopping at the first match
+    let an old, wrongly-aligned group hide the good one beside it, dropping the
+    position to the interpolated tier.
+    """
     ebook_time = audio_fraction = None
     if located is not None:
-        for e in fresh_entries:
+        for e in entries:
             if e.key.fmt == located.fmt and any(i[0] == located.fragment for i in e.items):
                 seconds, _ = e.time_for(located.fragment, located.offset)
                 score = e.mean_score(seconds)
-                if score is not None and score >= cfg.min_align_score:
+                if score is not None and score >= min_score:
                     ebook_time = seconds
-                break
-    if listening is not None:
-        for e in fresh_entries:
-            if e.audio_start <= listening.current_time < e.audio_end:
-                spine, offset, _ = e.position_for(listening.current_time)
-                score = e.mean_score(listening.current_time)
+                    break
+    if current_time is not None:
+        for e in entries:
+            if e.audio_start <= current_time < e.audio_end:
+                spine, offset, _ = e.position_for(current_time)
+                score = e.mean_score(current_time)
                 length = next((i[2] for i in e.items if i[0] == spine), 0)
-                if score is not None and score >= cfg.min_align_score and length:
+                if score is not None and score >= min_score and length:
                     audio_fraction = (spine, offset / length)
-                break
+                    break
     return ebook_time, audio_fraction
 
 
