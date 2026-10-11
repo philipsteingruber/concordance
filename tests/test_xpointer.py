@@ -68,6 +68,10 @@ class ResolveTest(unittest.TestCase):
         offset = resolve(self.doc, parse_xpointer("/body/DocFragment[3]/body/p[2]"))
         self.assertTrue(self.doc.text[offset:].startswith("Second"))
 
+    def test_places_a_bare_fragment_offset_at_the_start_of_the_spine_item(self):
+        offset = resolve(self.doc, parse_xpointer("/body/DocFragment[3].0"))
+        self.assertTrue(self.doc.text[offset:].startswith("Chapter One"))
+
     def test_rejects_a_path_whose_element_does_not_exist(self):
         with self.assertRaises(XPointerError):
             resolve(self.doc, parse_xpointer("/body/DocFragment[3]/body/p[9]/text().0"))
@@ -134,6 +138,13 @@ class ResolveAnyTest(unittest.TestCase):
                      "kepub": build_epub(Path(tmp), "b.kepub", KEPUB_BODY)}
             result = resolve_any("/body/DocFragment[3]/body/p[2]/text().3", files)
         self.assertEqual(result.fmt, "epub")
+
+    def test_resolves_a_bare_fragment_offset_against_the_first_candidate_with_that_spine_item(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            files = {"kepub": build_epub(Path(tmp), "b.kepub", KEPUB_BODY),
+                     "epub": build_epub(Path(tmp), "b.epub", EPUB_BODY)}
+            result = resolve_any("/body/DocFragment[3].0", files)
+        self.assertEqual((result.fmt, result.fragment, result.offset), ("kepub", 3, 0))
 
 
 if __name__ == "__main__":

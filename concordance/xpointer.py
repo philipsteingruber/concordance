@@ -39,7 +39,9 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 _STEP = re.compile(r"^([A-Za-z_][\w.-]*|text\(\))(?:\[(\d+)\])?$")
-_FRAGMENT = re.compile(r"^/body/DocFragment\[(\d+)\](/.*)?$")
+# KOReader drops the element path at the very start of a spine item and sends
+# just `/body/DocFragment[N].0`, so an offset may follow the bracket directly.
+_FRAGMENT = re.compile(r"^/body/DocFragment\[(\d+)\](/.*|\.\d+)?$")
 _OFFSET = re.compile(r"^(.*?)\.(\d+)$")
 
 VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
