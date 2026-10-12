@@ -10,7 +10,7 @@ import html
 import re
 import sqlite3
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -62,11 +62,35 @@ def _never_narrated(doc: bytes) -> bool:
         tokens.update(match.decode("utf-8", "replace").lower().split())
     if tokens & NEVER_NARRATED_TYPES:
         return True
+    return _heading(doc) in NEVER_NARRATED_HEADINGS
+
+
+def _heading(doc: bytes) -> str | None:
+    """The document's first heading, whitespace-collapsed and lower-cased."""
     heading = _HEADING.search(doc)
     if heading is None:
-        return False
+        return None
     text = _WS.sub(" ", html.unescape(_TAG.sub("", heading.group(1).decode("utf-8", "replace"))))
-    return text.strip().lower() in NEVER_NARRATED_HEADINGS
+    return text.strip().lower()
+
+
+# A glossary is only skipped before the story starts. Narrators don't read one
+# placed there (Sun-Kissed Fangs' 1,100-word "Court of Chains – Glossary" is
+# absent from its recording), but fantasy audiobooks do sometimes read a glossary
+# at the end, so a trailing one stays narrated. Matched as a word anywhere in the
+# heading because series prefix it with their own name.
+_GLOSSARY = re.compile(r"\bglossary\b")
+
+
+def _skip_leading_glossaries(items: list[SpineItem], glossaries: set[int]) -> list[SpineItem]:
+    """Mark glossaries that come before the first narrated content item as never narrated."""
+    out = list(items)
+    for pos, item in enumerate(out):
+        if item.index in glossaries:
+            out[pos] = replace(item, narrated=False)
+        elif item.narrated and item.is_content:
+            break
+    return out
 
 
 @dataclass(frozen=True)
@@ -219,6 +243,7 @@ def read_spine(epub_path: Path) -> list[SpineItem]:
                 if (ref.get("type") or "").lower() in NEVER_NARRATED_TYPES
             }
             items: list[SpineItem] = []
+            glossaries: set[int] = set()
             for i, ref in enumerate(opf.findall(".//{*}spine/{*}itemref"), start=1):
                 href = manifest.get(ref.get("idref"))
                 if not href:
@@ -236,7 +261,9 @@ def read_spine(epub_path: Path) -> list[SpineItem]:
                     or href.split("#")[0] in guide_hrefs
                     or _never_narrated(doc)
                 )
+                if _GLOSSARY.search(_heading(doc) or ""):
+                    glossaries.add(i)
                 items.append(SpineItem(index=i, href=href, chars=chars, narrated=narrated))
-            return items
+            return _skip_leading_glossaries(items, glossaries)
     except (zipfile.BadZipFile, ET.ParseError, KeyError, OSError) as exc:
         raise RuntimeError(f"cannot read EPUB {epub_path.name}: {exc}") from exc
