@@ -282,7 +282,20 @@ def save_state(report: Report, state_dir: Path) -> None:
                 continue
             fh.write(json.dumps({"at": report.generated_at, "calibre_book_id": p.calibre_book_id,
                                  "title": p.title, "direction": p.direction, "tier": p.tier,
-                                 "write": p.planned_write, "http": p.write_status}) + "\n")
+                                 "write": p.planned_write, "position": written_position(p),
+                                 "http": p.write_status}) + "\n")
+
+
+def written_position(entry: PairReport) -> str | float | None:
+    """The exact position a write sent, for telling two writes apart.
+
+    The description isn't enough for CWA: its percentage is clamped to just above
+    what CWA stores (writer.py), so writes to different XPointers can share one.
+    """
+    payload = entry.write_payload or {}
+    if "progress" in payload and isinstance(payload["progress"], str):
+        return payload["progress"]
+    return payload.get("currentTime")
 
 
 def main(argv: list[str] | None = None) -> int:
