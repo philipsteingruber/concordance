@@ -19,7 +19,8 @@ runs. Jobs run one at a time in the aligner container, and each is guarded:
 * **CPU:** the container runs at `CONCORDANCE_ALIGNER_CPU_SHARES` (Docker's
   default 1024). Raising it lets alignment outrank other containers competing for
   the CPU overnight; on cgroup v2 the shares map non-linearly to `cpu.weight`
-  (1024 -> 100, 26192 -> 1393).
+  (1024 -> 100, 26192 -> 1393). `--cpu-shares` overrides it for one run, e.g.
+  a daytime run that shouldn't outrank containers in use.
 
 Every outcome is appended to `<state dir>/runs/align-YYYYMMDD.jsonl`
 (`CONCORDANCE_STATE_DIR`, default `~/.cache/concordance`) for monitoring.
@@ -37,7 +38,7 @@ import os
 import subprocess
 import sys
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -295,6 +296,11 @@ def docker_options(cfg: Config, cache_root: Path) -> list[str]:
             "-v", f"{cfg.calibre_root}:{LIBRARY_CONTAINER}:ro"]
 
 
+def with_cpu_shares(cfg: Config, shares: int | None) -> Config:
+    """The config with this run's `--cpu-shares` in place of the configured value, if one was given."""
+    return cfg if shares is None else replace(cfg, aligner_cpu_shares=shares)
+
+
 def container_path(cfg: Config, host_path: str) -> str:
     """A path under the Calibre library as the aligner container sees it."""
     return LIBRARY_CONTAINER + host_path[len(cfg.calibre_root):]
@@ -370,12 +376,16 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--deadline", default=os.environ.get("CONCORDANCE_ALIGN_DEADLINE", ""),
                     help="HH:MM; no new job starts after this (default: CONCORDANCE_ALIGN_DEADLINE, "
                          "or no deadline)")
+    ap.add_argument("--cpu-shares", type=int, default=None,
+                    help="Docker CPU shares for this run's containers (default: CONCORDANCE_ALIGNER_CPU_SHARES)")
     ap.add_argument("--memory-wait-minutes", type=float,
                     default=env_number("CONCORDANCE_ALIGN_MEMORY_WAIT", 60),
                     help="how long to wait for free memory before stopping the run")
     args = ap.parse_args(argv)
     if args.min_free_mb < 0 or args.lookahead_minutes < 0:
         ap.error("--min-free-mb and --lookahead-minutes must not be negative")
+    if args.cpu_shares is not None and args.cpu_shares < 2:
+        ap.error("--cpu-shares must be at least 2 (Docker's minimum)")
     return args
 
 
@@ -402,7 +412,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         deadline = parse_deadline(args.deadline, datetime.now())
-        cfg = Config.from_env()
+        cfg = with_cpu_shares(Config.from_env(), args.cpu_shares)
         jobs = plan_jobs(cfg, args.lookahead_minutes, set(args.book_id) or None, log)
     except ServiceUnavailable as exc:
         print(f"error: {exc}", file=sys.stderr)

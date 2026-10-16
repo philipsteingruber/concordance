@@ -3,6 +3,10 @@
 # progress; see concordance/orchestrate.py for the memory, deadline and CPU guards.
 # Example crontab line:
 #   5 0 * * * /path/to/concordance/scripts/cron-align.sh
+# Arguments are passed to the orchestrator and win over the configured values
+# for that run, e.g. a daytime run at default CPU priority that starts nothing
+# after 17:00:
+#   0 12 * * * /path/to/concordance/scripts/cron-align.sh --cpu-shares 1024 --deadline 17:00
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
@@ -21,7 +25,7 @@ flock -n 9 || { echo "$(date -Is) align already running" >> "$STATE/runs/align.l
 
 {
   echo "=== $(date -Is) align start"
-  "$PYTHON" -m concordance.orchestrate --run
+  "$PYTHON" -m concordance.orchestrate --run "$@"
   rc=$?  # capture first: the $(date) below would reset $?
   echo "=== $(date -Is) align end (exit $rc)"
 } >> "$STATE/runs/align.log" 2>&1

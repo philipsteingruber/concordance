@@ -12,7 +12,8 @@ from concordance.cache import GroupKey
 from concordance.config import Config, ConfigError
 from concordance.orchestrate import (Job, aligner_stats, alignment_status, current_group_index, docker_command,
                                      fits_before_deadline, group_span, in_progress, memory_wait_until,
-                                     no_group_reason, order_jobs, parse_deadline, select_groups)
+                                     no_group_reason, order_jobs, parse_deadline, select_groups,
+                                     with_cpu_shares)
 
 # Four equal 1000 s chapters, four equal spine items (5-8): a clean 1:1 book.
 SPINE = [SpineItem(index=i, href=f"c{i}.xhtml", chars=20_000) for i in (5, 6, 7, 8)]
@@ -169,6 +170,14 @@ class DockerCommandTest(unittest.TestCase):
     def test_forwards_no_worker_tuning_that_is_unset(self):
         with unittest.mock.patch.dict("os.environ", {"CONCORDANCE_ALIGN_CHUNK_SECONDS": ""}):
             self.assertFalse(any(arg.startswith("CONCORDANCE_ALIGN_CHUNK_SECONDS") for arg in self.command()))
+
+    def test_runs_the_container_at_the_cpu_shares_given_for_this_run(self):
+        cmd = self.command(with_cpu_shares(dataclasses.replace(self.cfg, aligner_cpu_shares=26192), 1024))
+        self.assertEqual(cmd[cmd.index("--cpu-shares") + 1], "1024")
+
+    def test_keeps_the_configured_cpu_shares_when_the_run_gives_none(self):
+        cmd = self.command(with_cpu_shares(dataclasses.replace(self.cfg, aligner_cpu_shares=26192), None))
+        self.assertEqual(cmd[cmd.index("--cpu-shares") + 1], "26192")
 
     def test_refuses_to_build_a_command_without_an_audio_path_map(self):
         with self.assertRaises(ConfigError):
