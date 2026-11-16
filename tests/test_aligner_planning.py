@@ -1,7 +1,32 @@
 import unittest
+from pathlib import Path
 
 from concordance.aligner import (alnum_count, drop_untokenizable, estimate_peak_mb,
-                                 next_piece, restore_untokenizable, viterbi_mb)
+                                 next_piece, overlapping_pieces, restore_untokenizable,
+                                 viterbi_mb)
+
+
+class OverlappingPiecesTest(unittest.TestCase):
+    # One file per chapter, durations taken from a real audiobook.
+    a, b, c = Path("a.mp3"), Path("b.mp3"), Path("c.mp3")
+    manifest = [(a, 2014.132245), (b, 1583.856327), (c, 1424.822857)]
+
+    def test_drops_a_sliver_of_the_previous_file_left_by_rounding_the_start_down(self):
+        pieces = overlapping_pieces(self.manifest, 2014.132, 3597.965)
+        self.assertEqual([path for path, _, _ in pieces], [self.b])
+
+    def test_drops_a_sliver_of_the_next_file_when_the_end_overshoots_a_boundary(self):
+        pieces = overlapping_pieces(self.manifest, 2014.2, 3597.9887)
+        self.assertEqual([path for path, _, _ in pieces], [self.b])
+
+    def test_keeps_both_files_when_a_range_genuinely_spans_a_boundary(self):
+        pieces = overlapping_pieces(self.manifest, 2000.0, 2100.0)
+        self.assertEqual([path for path, _, _ in pieces], [self.a, self.b])
+
+    def test_gives_each_piece_its_offset_within_its_own_file(self):
+        pieces = overlapping_pieces(self.manifest, 2000.0, 2100.0)
+        self.assertAlmostEqual(pieces[1][1], 0.0)
+        self.assertAlmostEqual(pieces[0][1], 2000.0)
 
 
 class MemoryModelTest(unittest.TestCase):

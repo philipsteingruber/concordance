@@ -58,6 +58,32 @@ def _decode_file(path: Path, start: float, duration: float):
     return torch.frombuffer(bytearray(raw), dtype=torch.int16).to(torch.float32) / 32768.0
 
 
+MIN_PIECE_SECONDS = FRAME_SAMPLES / SAMPLING_FREQ   # one emission frame, 20 ms
+
+
+def overlapping_pieces(manifest: list[tuple[Path, float]], start: float,
+                       end: float) -> list[tuple[Path, float, float]]:
+    """The (file, offset into it, duration) pieces that cover book time [start, end).
+
+    Overlaps shorter than one emission frame are dropped. A group edge that sits
+    on a file boundary often lands a fraction of a millisecond inside the
+    neighbouring file, through float error or the `:.3f` rounding of `--start` /
+    `--end`. ffmpeg decodes such a sliver to zero bytes, which `torch.frombuffer`
+    rejects (seen on an audiobook with one MP3 per chapter, where three of
+    five groups failed this way).
+    """
+    pieces, file_start = [], 0.0
+    for path, duration in manifest:
+        file_end = file_start + duration
+        lo, hi = max(start, file_start), min(end, file_end)
+        if hi - lo >= MIN_PIECE_SECONDS:
+            pieces.append((path, lo - file_start, hi - lo))
+        file_start = file_end
+        if file_start >= end:
+            break
+    return pieces
+
+
 def decode_audio(manifest: list[tuple[Path, float]], start: float, end: float):
     """Decode book time [start, end) to a mono 16 kHz tensor.
 
@@ -68,15 +94,8 @@ def decode_audio(manifest: list[tuple[Path, float]], start: float, end: float):
     """
     import torch
 
-    pieces, file_start = [], 0.0
-    for path, duration in manifest:
-        file_end = file_start + duration
-        lo, hi = max(start, file_start), min(end, file_end)
-        if hi > lo:
-            pieces.append(_decode_file(path, lo - file_start, hi - lo))
-        file_start = file_end
-        if file_start >= end:
-            break
+    pieces = [_decode_file(path, offset, duration)
+              for path, offset, duration in overlapping_pieces(manifest, start, end)]
     if not pieces:
         raise RuntimeError(f"no audio in manifest covers {start:.1f}-{end:.1f}s")
     return torch.cat(pieces)
