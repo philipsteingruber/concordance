@@ -9,7 +9,7 @@
 # Expected values are a function of the book's structure and the rewind, so
 # they live in the profile.
 set -uo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../.." || exit 1
 
 # shellcheck source=contrib/sandbox/lib.sh
 . contrib/sandbox/lib.sh

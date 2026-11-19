@@ -27,9 +27,8 @@ export CONCORDANCE_SANDBOX_BOOK_ID="$BOOK"
 CWA_URL="${CWA_URL:-http://localhost:8083}"
 ABS_URL="${ABS_URL:-http://localhost:13378}"
 
-pass=0
-fail=0
-failed=()
+# shellcheck disable=SC2034  # counters updated by the test scripts that source this file
+pass=0 fail=0 failed=()
 
 cwa() {  # cwa <DocFragment> <fraction 0-1>
   local code

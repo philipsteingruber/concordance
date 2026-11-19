@@ -5,6 +5,7 @@
 # result by hand (open the ebook, play the audio), then record it here.
 # shellcheck shell=bash
 
+# shellcheck disable=SC2034  # read by the test scripts that source this profile
 BOOK=463                                         # Calibre id
 ABS_ITEM=c7f6855f-907b-4bc5-ab25-708e2273ead1    # ABS library item id
 DURATION=30288.247                               # ABS duration, seconds

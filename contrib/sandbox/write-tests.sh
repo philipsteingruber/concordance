@@ -6,7 +6,7 @@
 # allowlist is set to the sandbox book inside this script only; the sandbox is
 # reset on exit.
 set -uo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../.." || exit 1
 # shellcheck source=contrib/sandbox/lib.sh
 . contrib/sandbox/lib.sh
 
@@ -56,14 +56,18 @@ check W2 "audio ahead writes CWA XPointer" "$ok" "HTTP $status, device=$device p
 reset_sandbox; cwa_xp "$W_EBOOK_XP" "$W_EBOOK_PCT"
 row=$(CONCORDANCE_WRITE_ALLOWLIST=$BOOK concordance)
 t=$(abs_current_time)
-[ -z "$t" ] && [ "$(jq -r '.write_status // "none"' <<<"$row")" = none ]; ok=$?
+[ -z "$t" ] && [ "$(jq -r '.write_status // "none"' <<<"$row")" = none ]
+# shellcheck disable=SC2319  # ok is the result of the whole && test chain
+ok=$?
 check W3 "dry run writes nothing" "$ok" "ABS currentTime=${t:-none}, blocked_by=$(jq -c '.write_blocked_by' <<<"$row")"
 
 # W4: --apply without the book in the allowlist writes nothing.
 reset_sandbox; cwa_xp "$W_EBOOK_XP" "$W_EBOOK_PCT"
-row=$(CONCORDANCE_WRITE_ALLOWLIST= concordance --apply)
+row=$(CONCORDANCE_WRITE_ALLOWLIST='' concordance --apply)
 t=$(abs_current_time)
-[ -z "$t" ] && [ "$(jq -r '.write_status // "none"' <<<"$row")" = none ]; ok=$?
+[ -z "$t" ] && [ "$(jq -r '.write_status // "none"' <<<"$row")" = none ]
+# shellcheck disable=SC2319  # ok is the result of the whole && test chain
+ok=$?
 check W4 "not allowlisted writes nothing" "$ok" "ABS currentTime=${t:-none}, blocked_by=$(jq -c '.write_blocked_by' <<<"$row")"
 
 # W5: with the alignment cache, the ABS write uses the aligned time.
