@@ -105,6 +105,9 @@ class NeverNarratedTest(unittest.TestCase):
     def test_recognises_a_bibliography_by_its_heading(self):
         self.assertTrue(_never_narrated(b'<html><body><h1><span class="koboSpan">BIBLIOGRAPHY</span></h1>'))
 
+    def test_recognises_an_index_by_its_heading(self):
+        self.assertTrue(_never_narrated(b'<html><body><h1 class="chapter">INDEX</h1><p>Aachen, 12'))
+
     def test_recognises_image_credits_by_their_heading(self):
         self.assertTrue(_never_narrated(b"<html><body><h1>Image Credits</h1><p>Page ii"))
 

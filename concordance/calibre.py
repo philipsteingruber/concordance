@@ -47,6 +47,9 @@ NEVER_NARRATED_HEADINGS = frozenset({
     # Non-fiction back matter. Sisters of Scandal declares no role for either,
     # and together they are ~18% of its text (see anchor.build_alignment).
     "bibliography", "image credits",
+    # The Rise and Fall of the Third Reich's index has no role either, and it runs
+    # on over six more files with no heading at all (see read_spine).
+    "index",
 })
 
 
@@ -244,6 +247,13 @@ def read_spine(epub_path: Path) -> list[SpineItem]:
             }
             items: list[SpineItem] = []
             glossaries: set[int] = set()
+            # An index split across files names itself only in the first one; the
+            # rest have no heading. Without carrying the role over, the last of them
+            # stays narrated, trim_unnarrated_edges stops there, and the whole index
+            # enters the match (The Rise and Fall of the Third Reich: seven files,
+            # ~156k chars, confidence `unusable`). Only an index is carried: a
+            # heading-less file after a table of contents is usually chapter 1.
+            in_index = False
             for i, ref in enumerate(opf.findall(".//{*}spine/{*}itemref"), start=1):
                 href = manifest.get(ref.get("idref"))
                 if not href:
@@ -255,13 +265,17 @@ def read_spine(epub_path: Path) -> list[SpineItem]:
                     doc, chars = b"", 0
                 else:
                     chars = _visible_chars(doc)
+                heading = _heading(doc)
+                if heading is not None:
+                    in_index = heading == "index"
                 narrated = not (
                     ref.get("linear") == "no"
                     or ref.get("idref") in nav_ids
                     or href.split("#")[0] in guide_hrefs
                     or _never_narrated(doc)
+                    or in_index
                 )
-                if _GLOSSARY.search(_heading(doc) or ""):
+                if _GLOSSARY.search(heading or ""):
                     glossaries.add(i)
                 items.append(SpineItem(index=i, href=href, chars=chars, narrated=narrated))
             return _skip_leading_glossaries(items, glossaries)

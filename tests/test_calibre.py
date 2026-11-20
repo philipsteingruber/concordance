@@ -100,3 +100,26 @@ class ReadSpineGlossaryTest(unittest.TestCase):
                         "</span></h2></body></html>").encode()
             write_epub(epub, [glossary, CHAPTER])
             self.assertEqual(narrated_flags(read_spine(epub)), [False, True])
+
+
+HEADINGLESS = b"<html><body><p>" + b"entry, 12, 48 " * 300 + b"</p></body></html>"
+INDEX = b'<html><body><h1 class="chapter">INDEX</h1><p>' + b"entry, 12 " * 300 + b"</p></body></html>"
+CONTENTS = b"<html><body><h1>Contents</h1><p>" + b"Chapter " * 300 + b"</p></body></html>"
+
+
+class ReadSpineIndexTest(unittest.TestCase):
+    def flags(self, docs):
+        with tempfile.TemporaryDirectory() as tmp:
+            epub = Path(tmp) / "book.epub"
+            write_epub(epub, docs)
+            return narrated_flags(read_spine(epub))
+
+    def test_marks_heading_less_files_that_continue_an_index_as_never_narrated(self):
+        self.assertEqual(self.flags([CHAPTER, INDEX, HEADINGLESS, HEADINGLESS]),
+                         [True, False, False, False])
+
+    def test_narrates_a_headed_file_that_follows_an_index(self):
+        self.assertEqual(self.flags([INDEX, HEADINGLESS, CHAPTER]), [False, False, True])
+
+    def test_narrates_a_heading_less_file_that_follows_a_table_of_contents(self):
+        self.assertEqual(self.flags([CONTENTS, HEADINGLESS]), [False, True])
