@@ -123,3 +123,28 @@ class ReadSpineIndexTest(unittest.TestCase):
 
     def test_narrates_a_heading_less_file_that_follows_a_table_of_contents(self):
         self.assertEqual(self.flags([CONTENTS, HEADINGLESS]), [False, True])
+
+
+PRAISE = ('<html><body><h1 class="para-fst-fs-pg"><span class="koboSpan">Advance praise for'
+          "<br/>The Tainted Cup</span></h1><p>" + "A triumph. " * 300 + "</p></body></html>").encode()
+HYMN = b"<html><body><h1>A Hymn of Praise</h1><p>" + b"word " * 400 + b"</p></body></html>"
+
+
+class ReadSpinePraiseTest(unittest.TestCase):
+    def flags(self, docs):
+        with tempfile.TemporaryDirectory() as tmp:
+            epub = Path(tmp) / "book.epub"
+            write_epub(epub, docs)
+            return narrated_flags(read_spine(epub))
+
+    def test_marks_a_praise_page_before_the_first_chapter_as_never_narrated(self):
+        self.assertEqual(self.flags([PRAISE, CHAPTER]), [False, True])
+
+    def test_leaves_front_matter_behind_a_praise_page_at_the_trimmable_edge(self):
+        self.assertEqual(self.flags([PRAISE, CONTENTS, CHAPTER]), [False, False, True])
+
+    def test_keeps_a_praise_page_after_the_first_chapter_narrated(self):
+        self.assertEqual(self.flags([CHAPTER, PRAISE]), [True, True])
+
+    def test_narrates_an_opening_chapter_that_mentions_praise_mid_heading(self):
+        self.assertEqual(self.flags([HYMN, CHAPTER]), [True, True])

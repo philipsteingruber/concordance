@@ -83,10 +83,19 @@ def _heading(doc: bytes) -> str | None:
 # at the end, so a trailing one stays narrated. Matched as a word anywhere in the
 # heading because series prefix it with their own name.
 _GLOSSARY = re.compile(r"\bglossary\b")
+# A praise page ("Praise for …", "Advance praise for …") is skipped the same way,
+# before the story only. Narrators don't read blurbs, and The Tainted Cup's
+# 2,618-char page declares no role. Left narrated, it was the group's first
+# narrated item, so its copyright page and table of contents became interior
+# items that trim_unnarrated_edges keeps, and ~4,800 chars of front matter were
+# crammed into the first three minutes of chapter 1's audio (mean -1.09).
+# Anchored to the start of the heading: an opening chapter called "A Hymn of
+# Praise" must stay narrated.
+_PRAISE = re.compile(r"^(?:advance |early )?praise\b")
 
 
 def _skip_leading_glossaries(items: list[SpineItem], glossaries: set[int]) -> list[SpineItem]:
-    """Mark glossaries that come before the first narrated content item as never narrated."""
+    """Mark glossaries and praise pages that come before the first narrated content item as never narrated."""
     out = list(items)
     for pos, item in enumerate(out):
         if item.index in glossaries:
@@ -275,7 +284,7 @@ def read_spine(epub_path: Path) -> list[SpineItem]:
                     or _never_narrated(doc)
                     or in_index
                 )
-                if _GLOSSARY.search(heading or ""):
+                if _GLOSSARY.search(heading or "") or _PRAISE.match(heading or ""):
                     glossaries.add(i)
                 items.append(SpineItem(index=i, href=href, chars=chars, narrated=narrated))
             return _skip_leading_glossaries(items, glossaries)
