@@ -32,7 +32,8 @@ from pathlib import Path
 
 from .absclient import AbsClient, Chapter
 from .cache import AlignmentCache, manifest_fingerprint
-from .calibre import load_books, spine_file
+from .anchor import trim_unnarrated_edges
+from .calibre import SpineItem, load_books, read_spine, spine_file
 from .chapterdetect import ChapterStart, book_positions, detect, load_documents
 from .chapterprobe import estimate, observed_rate
 from .config import Config, ConfigError, ServiceUnavailable, env_number
@@ -204,9 +205,27 @@ def find_book(cfg: Config, abs_client: AbsClient, query: str) -> Book:
     positions = book_positions(docs)
     manifest = abs_client.audio_manifest(item)
     duration = sum(d for _, d in manifest)
+    starts = narrated_starts(detect(book_file, docs), read_spine(book_file))
     return Book(pair.calibre.book_id, pair.calibre.title, item, fmt, book_file, docs,
-                drop_crowded(detect(book_file, docs), positions, positions[-1], duration),
+                drop_crowded(starts, positions, positions[-1], duration),
                 positions, abs_client.chapters(item), manifest)
+
+
+def narrated_starts(starts: list[ChapterStart], spine: list[SpineItem]) -> list[ChapterStart]:
+    """Drop starts in spine items the audiobook doesn't narrate.
+
+    Uses the same notion of narrated as the boundary matcher: an item flagged never
+    narrated, or anything outside the narrated span `trim_unnarrated_edges` keeps.
+    Without this the probe hunted for SPQR's Further Reading, notes and index
+    (11 of 16 targets, ~15 minutes each) in audio that doesn't contain them.
+    """
+    kept = trim_unnarrated_edges([item for item in spine if item.is_content])
+    if not any(item.narrated for item in kept):
+        # Same fallback as the matcher: with nothing flagged narrated, keep everything.
+        return list(starts)
+    first, last = kept[0].index, kept[-1].index
+    unnarrated = {item.index for item in spine if not item.narrated}
+    return [s for s in starts if first <= s.spine <= last and s.spine not in unnarrated]
 
 
 def drop_crowded(starts: list[ChapterStart], positions: dict[int, int],

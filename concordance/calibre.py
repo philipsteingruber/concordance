@@ -37,6 +37,12 @@ NEVER_NARRATED_TYPES = frozenset({
 })
 _EPUB_TYPE = re.compile(rb'epub:type\s*=\s*["\']([^"\']+)["\']')
 _HEADING = re.compile(rb"(?is)<h[1-6][^>]*>(.*?)</h[1-6]>")
+# Some publishers style headings as paragraphs instead: SPQR's back matter is
+# `<p class="head">INDEX</p>` and so on, with no <hN> and no epub:type, so none
+# of it was recognised. Only a paragraph whose class names itself a heading
+# counts, so ordinary first paragraphs never do.
+_HEAD_PARAGRAPH = re.compile(
+    rb"""(?is)<p\b[^>]*\bclass\s*=\s*["'][^"']*\bhead(?:er|ing)?\b[^"']*["'][^>]*>(.*?)</p>""")
 # Headings that name a structural page. Kept deliberately small: every entry
 # has to be a title no novel would give a real chapter. Publishers mislabel the
 # machine-readable role (Jade City's copyright page declares
@@ -50,6 +56,13 @@ NEVER_NARRATED_HEADINGS = frozenset({
     # The Rise and Fall of the Third Reich's index has no role either, and it runs
     # on over six more files with no heading at all (see read_spine).
     "index",
+    # SPQR's back matter (2026-11-25): ~120k chars with no role, which pulled the
+    # boundary match off. Acknowledgements are on the list even though a narrator
+    # occasionally reads them: they sit among the back matter, and one left
+    # narrated keeps everything before it inside the match, because
+    # trim_unnarrated_edges trims only the edges.
+    "further reading", "list of illustrations", "timeline",
+    "acknowledgements", "acknowledgments",
 })
 
 
@@ -69,8 +82,11 @@ def _never_narrated(doc: bytes) -> bool:
 
 
 def _heading(doc: bytes) -> str | None:
-    """The document's first heading, whitespace-collapsed and lower-cased."""
-    heading = _HEADING.search(doc)
+    """The document's first heading, whitespace-collapsed and lower-cased.
+
+    An <hN> wins; a heading-styled paragraph is the fallback for books that have none.
+    """
+    heading = _HEADING.search(doc) or _HEAD_PARAGRAPH.search(doc)
     if heading is None:
         return None
     text = _WS.sub(" ", html.unescape(_TAG.sub("", heading.group(1).decode("utf-8", "replace"))))

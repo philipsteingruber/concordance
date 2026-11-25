@@ -148,3 +148,34 @@ class ReadSpinePraiseTest(unittest.TestCase):
 
     def test_narrates_an_opening_chapter_that_mentions_praise_mid_heading(self):
         self.assertEqual(self.flags([HYMN, CHAPTER]), [True, True])
+
+
+# SPQR styles its back-matter headings as paragraphs, with no <hN> and no epub:type.
+HEAD_PARAGRAPH_INDEX = (b'<html><body><p class="head"><a id="page_585"></a>INDEX</p><p>'
+                        + b"entry, 12 " * 300 + b"</p></body></html>")
+FURTHER_READING = (b'<html><body><p class="head">FURTHER READING</p><p>'
+                   + b"A study of Rome. " * 200 + b"</p></body></html>")
+ACKNOWLEDGEMENTS = (b"<html><body><h1>Acknowledgements</h1><p>"
+                    + b"Thanks to everyone. " * 150 + b"</p></body></html>")
+PLAIN_FIRST_PARAGRAPH = (b'<html><body><p class="first">Index</p><p>'
+                         + b"word " * 400 + b"</p></body></html>")
+
+
+class ReadSpineHeadingParagraphTest(unittest.TestCase):
+    def flags(self, docs):
+        with tempfile.TemporaryDirectory() as tmp:
+            epub = Path(tmp) / "book.epub"
+            write_epub(epub, docs)
+            return narrated_flags(read_spine(epub))
+
+    def test_recognises_an_index_headed_by_a_heading_styled_paragraph(self):
+        self.assertEqual(self.flags([CHAPTER, HEAD_PARAGRAPH_INDEX]), [True, False])
+
+    def test_marks_further_reading_as_never_narrated(self):
+        self.assertEqual(self.flags([CHAPTER, FURTHER_READING]), [True, False])
+
+    def test_marks_acknowledgements_as_never_narrated(self):
+        self.assertEqual(self.flags([CHAPTER, ACKNOWLEDGEMENTS]), [True, False])
+
+    def test_ignores_a_first_paragraph_whose_class_is_not_a_heading(self):
+        self.assertEqual(self.flags([CHAPTER, PLAIN_FIRST_PARAGRAPH]), [True, True])

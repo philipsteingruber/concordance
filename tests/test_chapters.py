@@ -9,7 +9,8 @@ from concordance.absclient import Chapter
 from concordance.chapterdetect import (ChapterStart, _label_parts, _numbered_runs, book_positions,
                                        chapter_number, heading_blocks)
 from concordance.chapterprobe import EDGE_SECONDS, estimate, half_window, judge, observed_rate
-from concordance.chapters import build_chapters, regions
+from concordance.calibre import SpineItem
+from concordance.chapters import build_chapters, narrated_starts, regions
 from concordance.xpointer import parse_document
 
 
@@ -418,6 +419,33 @@ class ProbeTest(unittest.TestCase):
     def test_rejects_a_poorly_scored_match(self):
         words = [{"start": 40.0, "score": -3.0}] * 5
         self.assertFalse(judge(words, 1000.0, 1120.0, -1.0)[0])
+
+
+class NarratedStartsTest(unittest.TestCase):
+    spine = [SpineItem(index=1, href="toc.html", chars=3000, narrated=False),
+             SpineItem(index=2, href="ch1.html", chars=50_000),
+             SpineItem(index=3, href="plates.html", chars=8000),
+             SpineItem(index=4, href="ch2.html", chars=50_000),
+             SpineItem(index=5, href="notes.html", chars=60_000, narrated=False),
+             SpineItem(index=6, href="index.html", chars=40_000, narrated=False)]
+
+    def spines(self, *indexes):
+        starts = [ChapterStart(i, 0, f"item {i}", "file") for i in indexes]
+        return [s.spine for s in narrated_starts(starts, self.spine)]
+
+    def test_drops_starts_in_back_matter_past_the_last_narrated_item(self):
+        self.assertEqual(self.spines(2, 4, 5, 6), [2, 4])
+
+    def test_drops_a_start_in_front_matter_flagged_never_narrated(self):
+        self.assertEqual(self.spines(1, 2), [2])
+
+    def test_keeps_an_unflagged_item_between_narrated_chapters(self):
+        self.assertEqual(self.spines(2, 3, 4), [2, 3, 4])
+
+    def test_keeps_every_start_when_nothing_in_the_spine_is_narrated(self):
+        spine = [SpineItem(index=i, href="", chars=50_000, narrated=False) for i in (1, 2)]
+        starts = [ChapterStart(i, 0, "", "file") for i in (1, 2)]
+        self.assertEqual(len(narrated_starts(starts, spine)), 2)
 
 
 if __name__ == "__main__":
