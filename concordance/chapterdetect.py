@@ -195,7 +195,9 @@ def toc_targets(book_file: Path) -> list[tuple[str, str | None, str]]:
         spine = opf.find(".//{*}spine")
         ncx_id = spine.get("toc") if spine is not None else None
         ncx = next((i for i in items if i.get("id") == ncx_id), None)
-        chosen = nav or ncx
+        # Not `nav or ncx`: an ElementTree element with no children is falsy, so that
+        # silently skipped every EPUB 3 nav and fell back to the NCX, or to nothing.
+        chosen = nav if nav is not None else ncx
         if chosen is None:
             return []
         toc_path = posixpath.normpath(posixpath.join(base, chosen.get("href") or ""))

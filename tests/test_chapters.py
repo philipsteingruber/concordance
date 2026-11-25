@@ -450,3 +450,26 @@ class NarratedStartsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TocTargetsTest(unittest.TestCase):
+    def test_reads_an_epub3_nav_when_the_book_has_no_ncx(self):
+        import tempfile
+        import zipfile
+        from concordance.chapterdetect import toc_targets
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "book.epub"
+            with zipfile.ZipFile(path, "w") as zf:
+                zf.writestr("META-INF/container.xml",
+                            '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles>'
+                            '<rootfile full-path="OEBPS/content.opf"/></rootfiles></container>')
+                zf.writestr("OEBPS/content.opf",
+                            '<package xmlns="http://www.idpf.org/2007/opf"><manifest>'
+                            '<item id="nav" href="../nav.xhtml" properties="nav"/>'
+                            '<item id="c1" href="chap01.html"/></manifest>'
+                            '<spine><itemref idref="c1"/></spine></package>')
+                zf.writestr("nav.xhtml",
+                            '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">'
+                            '<body><nav epub:type="toc"><ol><li><a href="OEBPS/chap01.html">Chapter One • '
+                            'The Lighthouse</a></li></ol></nav></body></html>')
+            self.assertEqual(toc_targets(path), [("OEBPS/chap01.html", None, "Chapter One • The Lighthouse")])
