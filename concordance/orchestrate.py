@@ -262,6 +262,15 @@ def aligner_stats(stdout: str) -> dict:
     return {}
 
 
+def stderr_tail(stderr: str, lines: int = 20) -> str:
+    """The last lines of a worker's stderr, kept in the log when a job fails.
+
+    The stats line goes to stdout, so a crash leaves nothing there; without this
+    tail the traceback is lost with the container.
+    """
+    return "\n".join(stderr.rstrip().splitlines()[-lines:])
+
+
 def alignment_status(code: int, stats: dict, min_score: float) -> str:
     """Outcome label. A clean exit with a poor mean score usually means the text
     was matched to the wrong audio (a spine off-by-one scored -5.9, against -0.07
@@ -318,14 +327,14 @@ def docker_command(job: Job, cfg: Config, cache_root: Path, manifest_name: str) 
             "--aligner-commit", ALIGNER_COMMIT]
 
 
-def run_job(job: Job, cfg: Config, cache_root: Path) -> tuple[int, dict]:
+def run_job(job: Job, cfg: Config, cache_root: Path) -> tuple[int, dict, str]:
     work = cache_root / "work" / "manifests"
     work.mkdir(parents=True, exist_ok=True)
     manifest_file = work / f"{job.key.library_item_id}.json"
     manifest_file.write_text(json.dumps([{"path": p, "duration": d} for p, d in job.manifest]))
     cmd = docker_command(job, cfg, cache_root, manifest_file.name)
     result = subprocess.run(cmd, capture_output=True, text=True)
-    return result.returncode, aligner_stats(result.stdout)
+    return result.returncode, aligner_stats(result.stdout), result.stderr
 
 
 def fits_before_deadline(audio_seconds: float, now: datetime, deadline: datetime | None,
@@ -450,11 +459,12 @@ def main(argv: list[str] | None = None) -> int:
                      "estimated_minutes": round((job.end - job.start) * ESTIMATED_PACE / 60)})
                 continue
             started = time.time()
-            code, stats = run_job(job, cfg, cache_root)
+            code, stats, stderr = run_job(job, cfg, cache_root)
             log({**base, "status": alignment_status(code, stats, cfg.min_align_score), "exit": code,
                  "seconds": round(time.time() - started), "words": stats.get("words"),
                  "mean_score": stats.get("mean_score"), "chunks": len(stats.get("chunks") or []) or None,
-                 "peak_rss_mb": stats.get("peak_rss_mb")})
+                 "peak_rss_mb": stats.get("peak_rss_mb"),
+                 **({"stderr": stderr_tail(stderr)} if code != 0 else {})})
             continue
         # memory didn't free up in time: stop this run
         break

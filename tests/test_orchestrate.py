@@ -10,7 +10,7 @@ from concordance.calibre import SpineItem
 from concordance.cwa import CwaProgress
 from concordance.cache import GroupKey
 from concordance.config import Config, ConfigError
-from concordance.orchestrate import (Job, aligner_stats, alignment_status, current_group_index, docker_command,
+from concordance.orchestrate import (Job, aligner_stats, alignment_status, stderr_tail, current_group_index, docker_command,
                                      fits_before_deadline, group_span, in_progress, memory_wait_until,
                                      no_group_reason, order_jobs, parse_deadline, select_groups,
                                      with_cpu_shares)
@@ -143,6 +143,15 @@ class AlignmentStatusTest(unittest.TestCase):
 
     def test_labels_exit_137_as_out_of_memory(self):
         self.assertEqual(alignment_status(137, {}, -1.0), "killed-oom")
+
+
+class StderrTailTest(unittest.TestCase):
+    def test_keeps_only_the_last_lines_of_a_long_traceback(self):
+        err = "\n".join(f"line {i}" for i in range(50)) + "\n"
+        self.assertEqual(stderr_tail(err, lines=3), "line 47\nline 48\nline 49")
+
+    def test_returns_an_empty_string_when_the_worker_wrote_nothing(self):
+        self.assertEqual(stderr_tail(""), "")
 
 
 class DockerCommandTest(unittest.TestCase):
