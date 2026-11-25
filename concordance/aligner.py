@@ -61,6 +61,21 @@ def _decode_file(path: Path, start: float, duration: float):
 MIN_PIECE_SECONDS = FRAME_SAMPLES / SAMPLING_FREQ   # one emission frame, 20 ms
 
 
+def whole_frames(samples: int) -> int:
+    """`samples` rounded down to a whole number of emission frames.
+
+    `generate_emissions` pads its input up to whole 30 s windows and then drops the
+    padding with `emissions[: -(extension // ratio)]`. When the input is 1-319
+    samples short of a multiple of 30 s, `extension // ratio` is 0 and `[:-0]` is
+    empty, so it returns zero frames and `forced_align` fails with "cannot create
+    std::vector larger than max_size()". The chapter probe's windows are exact
+    multiples of 30 s, and decoding one across a file boundary loses a few samples
+    (SPQR, 2026-11-25). Feeding it whole frames only keeps `extension` a multiple
+    of the frame size, at the cost of under 20 ms of audio at the end.
+    """
+    return samples - samples % FRAME_SAMPLES
+
+
 def overlapping_pieces(manifest: list[tuple[Path, float]], start: float,
                        end: float) -> list[tuple[Path, float, float]]:
     """The (file, offset into it, duration) pieces that cover book time [start, end).
@@ -168,6 +183,8 @@ def sliced_emissions(model, waveform, slice_seconds: int = 0, batch_size: int = 
 
     if slice_seconds and slice_seconds % 30:
         raise ValueError("slice_seconds must be a multiple of 30")
+    # Every slice below starts and ends on a whole frame once the total does.
+    waveform = waveform[:whole_frames(waveform.size(0))]
     total = waveform.size(0)
     if not slice_seconds or total <= slice_seconds * SAMPLING_FREQ:
         return generate_emissions(model, waveform, batch_size=batch_size)

@@ -3,7 +3,22 @@ from pathlib import Path
 
 from concordance.aligner import (alnum_count, drop_untokenizable, estimate_peak_mb,
                                  next_piece, overlapping_pieces, restore_untokenizable,
-                                 viterbi_mb)
+                                 viterbi_mb, whole_frames)
+
+
+class WholeFramesTest(unittest.TestCase):
+    # SPQR's 960 s probe window across a file boundary decoded to 10 samples short.
+    def test_rounds_a_window_just_short_of_whole_thirty_second_windows_down_to_a_frame(self):
+        self.assertEqual(whole_frames(15_359_990), 15_359_680)
+
+    def test_leaves_a_length_that_is_already_whole_frames_unchanged(self):
+        self.assertEqual(whole_frames(15_360_000), 15_360_000)
+
+    def test_keeps_the_padding_past_a_trimmed_length_a_multiple_of_the_frame_size(self):
+        window = 30 * 16_000
+        for samples in (15_359_990, 15_360_001, 480_319, 1_234_567):
+            extension = -whole_frames(samples) % window
+            self.assertEqual(extension % 320, 0)
 
 
 class OverlappingPiecesTest(unittest.TestCase):
