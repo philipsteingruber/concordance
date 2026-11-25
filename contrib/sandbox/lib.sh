@@ -1,6 +1,6 @@
 # Shared helpers for the sandbox scripts. Source this; don't run it.
 # The sandbox book and its expectations come from a profile file named by
-# CONCORDANCE_SANDBOX_PROFILE (see profiles/lucky-day.sh and contrib/sandbox/README.md).
+# CONCORDANCE_SANDBOX_PROFILE (see profiles/example.sh and contrib/sandbox/README.md).
 # shellcheck shell=bash
 
 profile="${CONCORDANCE_SANDBOX_PROFILE:-}"
@@ -8,7 +8,7 @@ if [ -z "$profile" ] || [ ! -f "$profile" ]; then
   echo "error: set CONCORDANCE_SANDBOX_PROFILE to a sandbox profile file (see contrib/sandbox/README.md)" >&2
   exit 2
 fi
-# shellcheck source=profiles/lucky-day.sh
+# shellcheck source=profiles/example.sh
 . "$profile"
 
 for var in CWA_USER CWA_APP_PASSWORD ABS_API_KEY CWA_APP_DB CALIBRE_ROOT; do

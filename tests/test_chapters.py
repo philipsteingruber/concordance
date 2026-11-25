@@ -228,7 +228,7 @@ class CacheLookupTest(unittest.TestCase):
 class ChapterScoreGateTest(unittest.TestCase):
     """A confirmation is an anchor, so it is held to a stricter score than a write.
 
-    On Misery the 21 correct confirmations scored between -0.01 and -0.23 and the
+    On one novel the 21 correct confirmations scored between -0.01 and -0.23 and the
     two wrong ones -0.92 and -0.93. The wrong pair cleared the -1.0 write gate,
     placed their chapters about 85 s early, and every later estimate interpolated
     from them.
@@ -314,7 +314,7 @@ class BookPositionTest(unittest.TestCase):
     """Short items between the content ones are narrated, and must be counted.
 
     A part divider is a few hundred characters and about a minute and a half of
-    narration. Leaving Misery's "PART FOUR GODDESS" epigraph out of the map put
+    narration. Leaving one novel's fourth part divider and epigraph out of the map put
     all of Part Four ~160 s early, past the reach of a doubled search window.
     """
 
@@ -382,7 +382,7 @@ class ClampSlackTest(unittest.TestCase):
     """A chapter may begin a second or two after the previous known point.
 
     The window is clamped to the known points, and the edge test then throws out
-    anything landing within three seconds of one. Misery's Part Two chapter 15
+    anything landing within three seconds of one. One novel's Part Two chapter 15
     begins 2.4 s after the previous spine item's narration ends, so it was refused
     for being exactly where it belongs.
     """
@@ -401,7 +401,7 @@ class TailEstimateTest(unittest.TestCase):
     """Past the last measured anchor, extrapolate; don't pin to a fictional endpoint.
 
     The end of the audio used to be an anchor, which asserts the ebook's last
-    character is spoken at the last second. Misery ends with a preview of another
+    character is spoken at the last second. One novel ends with a preview of another
     novel - 3.3% of the text, about twenty minutes of narration that does not
     exist - so every estimate after the final confirmed chapter was dragged early
     enough that none could be found.

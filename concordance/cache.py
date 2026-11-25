@@ -161,7 +161,7 @@ class Entry:
         """Mean word score within ±window of a time: the confidence gate for a write.
 
         Positional on purpose. An entry can align well overall and still be
-        rubbish in one stretch - Misery's spine 14 opens with 150 s of text
+        rubbish in one stretch - one novel's spine 14 opens with 150 s of text
         crammed at four times narration speed - and a lookup lands at a
         position, not at an average.
         """

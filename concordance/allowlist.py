@@ -3,8 +3,8 @@
 Kept in a plain file, one id per line, so it can be edited without touching the
 credential file:
 
-    561  # Misery
-    581  # The Escape Room
+    561  # First Book
+    581  # Second Book
 
 `#` starts a comment and lines without a leading id are ignored. The file is
 `allowlist` in the repository root unless CONCORDANCE_WRITE_ALLOWLIST_FILE says

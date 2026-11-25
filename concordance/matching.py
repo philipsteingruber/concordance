@@ -5,8 +5,8 @@ title matching finds 103 of 103 possible pairs with zero false negatives.
 ISBN contributes 8, ASIN contributes nothing. Title does the real work, so
 this stays deliberately simple.
 
-Author agreement is a review flag, never a hard gate: `The Wandering Inn` is
-a correct pair whose author is `pirateaba` in Calibre and `Pirate Aba` in ABS.
+Author agreement is a review flag, never a hard gate: a correct pair can have its author
+written as `authorname` in Calibre and `Author Name` in ABS.
 """
 
 from __future__ import annotations

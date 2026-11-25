@@ -37,7 +37,7 @@ MIN_HALF_WINDOW = 60.0
 MAX_HALF_WINDOW = 480.0
 EDGE_SECONDS = 3.0
 # The window is clamped to the known points either side. A chapter can legitimately
-# begin within a second or two of one - Misery's Part Two chapter 15 starts 2.4 s
+# begin within a second or two of one - one novel's Part Two chapter 15 starts 2.4 s
 # after the previous item's narration ends - and would then sit inside EDGE_SECONDS
 # of the clamp and be thrown out. Standing the clamp back by this much costs
 # nothing: a start earlier than the previous *chapter* is still refused outright.
@@ -69,7 +69,7 @@ def estimate(anchors: list[tuple[int, float]], pos: int, rate: float | None = No
     Past the last anchor the position is extrapolated at `rate` rather than
     pinned to the last known time. Anchors are measurements - a cached word
     timing, or a chapter already confirmed - and the end of the audio is not one
-    of them: an ebook routinely carries matter the audiobook never reads. Misery
+    of them: an ebook routinely carries matter the audiobook never reads. One novel
     ends with a preview of a different novel, 3.3% of the text and about twenty
     minutes of narration that does not exist, and treating the last character as
     the last second dragged every estimate after the final confirmed chapter far

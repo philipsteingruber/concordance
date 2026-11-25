@@ -6,8 +6,8 @@ across the whole book. Error then resets at every matched boundary rather than
 accumulating.
 
 Matching lines up **boundaries**, not item counts. Publishers routinely pack
-several chapters into one EPUB file (Don't Call Me Hero: 9 files, 23 audio
-chapters) or split one chapter across several audio tracks (Hitchhiker's Guide:
+several chapters into one EPUB file (one book: 9 files, 23 audio
+chapters) or split one chapter across several audio tracks (another:
 35 files, 66 tracks). Pairing item N with chapter N breaks on both. Instead we
 walk the two lists together and match a text boundary to an audio boundary when
 the stretches between consecutive matches have consistent proportions. One
@@ -277,7 +277,7 @@ def build_alignment(spine: list[SpineItem], chapters: list[Chapter]) -> Alignmen
     # Never-narrated items at the book's ends are left out of the match, not just
     # trimmed from a group afterwards. Back matter heavier than a chapter is
     # cheaper for the matcher to absorb than to skip when the chapters are of
-    # similar length: Sisters of Scandal's bibliography and image credits (62,000
+    # similar length: one non-fiction book's bibliography and image credits (62,000
     # chars, ~18% of the text) took the last three audio chapters and pulled every
     # earlier group up to three chapters early. Interior items stay, for the reason
     # trim_unnarrated_edges gives.

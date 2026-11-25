@@ -1,6 +1,6 @@
 """Step 0 for sub-item anchoring: would a finer text grid actually help, and where?
 
-The boundary matcher's text atom is the spine *file*. Misery's content spine is
+The boundary matcher's text atom is the spine *file*. One novel's content spine is
 9 items, so the dynamic program can never return more than 9 boundary pairs no
 matter how good the audio chapter list gets - and `coverage` divides by
 min(spine_count, chapter_count), so it reports a contented 1.0 while being as
@@ -20,7 +20,7 @@ result unreadable.
 Accuracy is measured against forced-alignment cache entries, which give a real
 audio time for a character offset. For books the chapters tool never touched
 (463, 522, 581) that ground truth is independent of the grid being tested. For
-Misery it is NOT: its ABS chapters were written from those same measurements,
+the split novel it is NOT: its ABS chapters were written from those same measurements,
 so a good `fine` score there shows the matcher recovers the mapping, not that
 the mapping is right. Both are reported, labelled.
 
@@ -53,7 +53,7 @@ from concordance.chapterdetect import book_positions, detect, load_documents
 from concordance.matching import normalise_title as norm
 
 # Ground-truth words are only trusted where the aligner was confident, the same
-# positional gate the live lookup uses. Misery's spine 14 opens with ~1500 words
+# positional gate the live lookup uses. One novel's spine 14 opens with ~1500 words
 # crammed at four times narration speed; without this the "truth" is fiction.
 MIN_TRUTH_SCORE = -0.5
 # Offsets sampled per cache entry. Enough for a stable p90, cheap enough to run
@@ -339,8 +339,8 @@ def main(argv=None) -> int:
         print(f"  {'book':<30} {'n':>5}  {'coarse (live today)':<28} fine")
         for title, n, coarse_err, fine_err in accuracy:
             print(f"  {title[:30]:<30} {n:>5}  {summarise(coarse_err):<28} {summarise(fine_err)}")
-        print("\n  Independent for books the chapters tool never split. For Misery and"
-              "\n  The Burn Palace the ABS chapters were written from these same"
+        print("\n  Independent for books the chapters tool never split. For the two"
+              "\n  books it split, the ABS chapters were written from these same"
               "\n  measurements, so `fine` there shows the matcher recovers the mapping,"
               "\n  not that the mapping is correct.")
     return 0

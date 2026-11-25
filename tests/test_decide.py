@@ -165,7 +165,7 @@ class ResolvedEbookFloorTest(unittest.TestCase):
     """With the ebook's position resolved, the exact check decides, not the percentage.
 
     The percentage floor's tolerance is the whole CWA_PERCENT_MARGIN, so on its own
-    it held back up to that many points of listening: Green-Eyed Monster sat half
+    it held back up to that many points of listening: one book sat half
     an hour of audio behind in the ebook without a write.
     """
 

@@ -7,7 +7,7 @@ from concordance.aligner import (alnum_count, drop_untokenizable, estimate_peak_
 
 
 class WholeFramesTest(unittest.TestCase):
-    # SPQR's 960 s probe window across a file boundary decoded to 10 samples short.
+    # A real book's 960 s probe window across a file boundary decoded to 10 samples short.
     def test_rounds_a_window_just_short_of_whole_thirty_second_windows_down_to_a_frame(self):
         self.assertEqual(whole_frames(15_359_990), 15_359_680)
 
@@ -92,8 +92,8 @@ class UntokenizableWordTest(unittest.TestCase):
     """
 
     TOKENS = ["<star>", "", "a n n i e", "l a r d e r", "<star>"]
-    TEXTS = ["<star>", "17", "Annie's", "larder", "<star>"]
-    ALIGNED = [{"start": 303.2, "end": 303.6, "text": "Annie's", "score": -0.09},
+    TEXTS = ["<star>", "17", "Anna's", "larder", "<star>"]
+    ALIGNED = [{"start": 303.2, "end": 303.6, "text": "Anna's", "score": -0.09},
                {"start": 303.6, "end": 304.1, "text": "larder", "score": -0.05}]
 
     def test_removes_a_word_the_romanizer_emptied(self):
@@ -108,7 +108,7 @@ class UntokenizableWordTest(unittest.TestCase):
         """build_entry pairs output with the text word by word and refuses a mismatch."""
         _, _, kept = drop_untokenizable(self.TOKENS, self.TEXTS)
         out = restore_untokenizable(self.ALIGNED, self.TEXTS, kept)
-        self.assertEqual([w["text"] for w in out], ["17", "Annie's", "larder"])
+        self.assertEqual([w["text"] for w in out], ["17", "Anna's", "larder"])
 
     def test_places_a_restored_word_where_narration_actually_begins(self):
         _, _, kept = drop_untokenizable(self.TOKENS, self.TEXTS)

@@ -70,7 +70,7 @@ def whole_frames(samples: int) -> int:
     empty, so it returns zero frames and `forced_align` fails with "cannot create
     std::vector larger than max_size()". The chapter probe's windows are exact
     multiples of 30 s, and decoding one across a file boundary loses a few samples
-    (SPQR, 2026-11-25). Feeding it whole frames only keeps `extension` a multiple
+    (a non-fiction book, 2026-11-25). Feeding it whole frames only keeps `extension` a multiple
     of the frame size, at the cost of under 20 ms of audio at the end.
     """
     return samples - samples % FRAME_SAMPLES
@@ -104,7 +104,7 @@ def decode_audio(manifest: list[tuple[Path, float]], start: float, end: float):
 
     `manifest` is the book's audio files in playback order with durations, as
     ABS lists them. ABS chapter times run across the whole book, so a range can
-    begin in one file and end in another (The Builders: 52 MP3s; most books: one
+    begin in one file and end in another (one book: 52 MP3s; most books: one
     .m4b). Each overlapping file is decoded for its share and concatenated.
     """
     import torch
@@ -119,12 +119,12 @@ def decode_audio(manifest: list[tuple[Path, float]], start: float, end: float):
 # --- memory model ---------------------------------------------------------------
 #
 # Fitted to measured batch-1 runs (2026-09-17) inside the aligner image:
-#   The Builders ch 6:  358 s audio,  3,628 alnum chars -> peak 2,438 MB
-#   Lucky Day ch 7:   2,418 s audio, 25,782 alnum chars -> peak 3,024 MB
+#   Book A ch 6:        358 s audio,  3,628 alnum chars -> peak 2,438 MB
+#   Book B ch 7:      2,418 s audio, 25,782 alnum chars -> peak 3,024 MB
 # The emissions phase grows slowly with audio length. The Viterbi phase adds
 # backpointers of 2 bits x (2L+2) x (T-L) (ctc-forced-aligner's
 # forced_align_impl.cpp), L = alphanumeric characters, T = 50 frames/s. That
-# formula gave 1,226 MB for Lucky Day ch 7 against 1,178 MB measured. PyTorch
+# formula gave 1,226 MB for Book B ch 7 against 1,178 MB measured. PyTorch
 # keeps memory freed after emissions and reuses it, so the phases don't add;
 # `retained` is fitted so the Viterbi phase reproduces the 3,024 MB peak.
 VITERBI_SAFETY = 1.15        # headroom on the only term that grows quadratically
@@ -217,7 +217,7 @@ def drop_untokenizable(tokens: list[str], texts: list[str]) -> tuple[list[str], 
     number, so a caller reading the first word's time is told the chapter starts
     at the beginning of whatever audio was searched. A book that spells its
     chapters out ("One", "Two") aligns perfectly and one that uses digits fails
-    completely - exactly the split between The Burn Palace and Misery.
+    completely - exactly the split between the first two books it was tried on.
     """
     kept = [bool(tok.strip()) for tok in tokens]
     return ([t for t, k in zip(tokens, kept) if k],
@@ -283,7 +283,7 @@ def align_chunked(model, tokenizer, manifest, text: str, start: float, end: floa
     is decoded; an over-budget piece is shrunk rather than run.
 
     `end` comes from the boundary matcher's coarse spine-to-chapter grid, which
-    on some books runs hundreds of seconds early (Misery: 530 s median, p90
+    on some books runs hundreds of seconds early (one novel: 530 s median, p90
     671). It is therefore a soft target: a piece may reach up to `end_slack`
     past it, and the wall test applies to the last piece too. Before 2026-09-19
     it did not -- the final piece was pinned to `end` and excluded from the

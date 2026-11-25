@@ -194,7 +194,7 @@ repository instead. Each change prints the resulting list.
 The allowlist is a plain, git-ignored file, `allowlist` in the repository root
 (`CONCORDANCE_WRITE_ALLOWLIST_FILE` moves it), with one id per line. With
 `.env` loaded, `add` looks the book up in Calibre and writes its title as a
-comment (`561  # Misery`), and warns if no book has that id. Ids in the
+comment (`561  # First Book`), and warns if no book has that id. Ids in the
 `CONCORDANCE_WRITE_ALLOWLIST` variable are allowed as well, and `remove` warns
 when an id is still allowed there.
 

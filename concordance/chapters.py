@@ -53,8 +53,8 @@ MAX_GAP = 3                  # unsplit ABS chapters between split ones are rebui
 # A chapter this many times the book's median length is a slice whatever the
 # book-level ratio says, so it stays eligible after a book has already been split.
 LONG_CHAPTER_FACTOR = 3.0
-# A chapter mark shorter than this is not worth having: Misery's Part Three
-# alternates between Paul's narrative and the manuscript he is typing and numbers
+# A chapter mark shorter than this is not worth having: one novel's Part Three
+# alternates between the narrator's story and a manuscript inside it and numbers
 # each switch, so starts land as little as four seconds apart. This is a
 # usability floor, not a correctness guard - `chapterprobe` rejects a start at or
 # before the previous one whatever this is set to. Measured in audio seconds
@@ -71,7 +71,7 @@ MIN_MARK_GAP_SECONDS = 5.0
 # into the known points and every later estimate interpolates from it. One wrong
 # accept therefore costs the rest of the run, so confirmations are held to a
 # stricter score than CONCORDANCE_MIN_ALIGN_SCORE, which gates writes and can
-# afford to be lenient. Measured on Misery: 22 correct confirmations scored -0.01
+# afford to be lenient. Measured on one novel: 22 correct confirmations scored -0.01
 # to -0.23, while a wrong one scored -0.93, slipped past the -1.0 write gate,
 # placed its chapter 85 s early and took about thirty later chapters down with it.
 CHAPTER_MIN_SCORE = env_number("CONCORDANCE_CHAPTER_MIN_SCORE", -0.5, float)
@@ -121,7 +121,7 @@ def regions(chapters: list[Chapter], times: list[float]) -> list[tuple[int, int]
 
     A chapter far longer than the book's median is exempt from that test. Once a
     book has been split once the ratio falls close to 1, and any chapter whose own
-    contents could not be located stays a slice for good - Misery came out of its
+    contents could not be located stays a slice for good - one novel came out of its
     first split with one 21-minute chapter among a 5-minute median, holding five
     real chapters that a later fix could have found. Being several times the median
     is not boundary noise, so the book-level ratio has nothing to say about it.
@@ -230,7 +230,7 @@ def narrated_starts(starts: list[ChapterStart], spine: list[SpineItem]) -> list[
 
     Uses the same notion of narrated as the boundary matcher: an item flagged never
     narrated, or anything outside the narrated span `trim_unnarrated_edges` keeps.
-    Without this the probe hunted for SPQR's Further Reading, notes and index
+    Without this the probe hunted for one book's Further Reading, notes and index
     (11 of 16 targets, ~15 minutes each) in audio that doesn't contain them.
     """
     kept = trim_unnarrated_edges([item for item in spine if item.is_content])
@@ -289,7 +289,7 @@ def cached_times(cfg: Config, book: Book) -> dict[int, float]:
         # Briefly changed to an entry-wide mean on the theory that a one-sided
         # window at an item's first word was rejecting good answers; measured, it
         # admitted exactly one extra chapter start out of 55 and that one was
-        # wrong - it sat in the 150 s at the start of Misery's spine 14 where the
+        # wrong - it sat in the 150 s at the start of one novel's spine 14 where the
         # text is crammed at four times narration speed. A position gate belongs
         # at the position.
         spines = {item[0]: item[2] for item in entry.items}
@@ -308,7 +308,7 @@ def entry_anchors(cfg: Config, book: Book) -> list[tuple[int, float]]:
 
     Estimates interpolate the character-to-time rate between anchors, which is
     only valid where the narration runs continuously. Between two spine items it
-    often does not: Misery has 416 seconds of part announcement between spine 13
+    often does not: one novel has 416 seconds of part announcement between spine 13
     and spine 14 that carry no book text, and interpolating across it put the
     estimate for the chapter at the start of spine 14 392 seconds early - far
     enough that the search window never contained the answer. Pinning both ends
@@ -317,7 +317,7 @@ def entry_anchors(cfg: Config, book: Book) -> list[tuple[int, float]]:
     An end is offered as an anchor only where the alignment there is trustworthy,
     by the same positional score that decides whether a time may be read out of
     the cache at all. An entry can align well overall and badly in one stretch,
-    and its ends are exactly where that happens: Misery's spine 14 opens with 150
+    and its ends are exactly where that happens: one novel's spine 14 opens with 150
     seconds of text crammed at four times narration speed, and its first character
     scores -8.99. `cached_times` refuses to report that position, so offering the
     same position as a measured anchor was the tool disagreeing with itself, and
@@ -548,7 +548,7 @@ def propose(cfg: Config, abs_client: AbsClient, query: str) -> int:
     # Which ABS chapters to rebuild is decided from the same interpolation the
     # probe uses, not from a whole-book proportion. The proportion divides by
     # every character in the ebook, so anything the audiobook doesn't narrate
-    # squeezes all of them: Misery carries 23,000 characters of previews for
+    # squeezes all of them: one novel carries 23,000 characters of previews for
     # other books, which pulled its last part 1,700 s early - far enough that the
     # ABS chapter actually holding those chapters no longer looked like it held
     # anything, and a second pass found nothing to do.

@@ -1,5 +1,5 @@
 # Sandbox profile: the book, its ids, and the expected results for its structure.
-# This one is the author's (Lucky Day by Chuck Tingle: 14 chapters of ~38 min,
+# This one is the author's (a novel with 14 chapters of ~38 min,
 # spine items 5-18 = ABS chapters 2-15). Copy it for your own sandbox book and
 # recompute the expectations: run each setup against your book once, check the
 # result by hand (open the ebook, play the audio), then record it here.

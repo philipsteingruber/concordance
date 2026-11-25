@@ -32,7 +32,7 @@ class TrimUnnarratedEdgesTest(unittest.TestCase):
 
 
 class GroupBoundsTest(unittest.TestCase):
-    """A front-matter item absorbed into the first group, as Jade City has."""
+    """A front-matter item absorbed into the first group, as one real book has."""
 
     def setUp(self):
         self.spine = [item(1, 2_000, narrated=False)] + [item(i) for i in (2, 3, 4, 5)]
@@ -47,7 +47,7 @@ class GroupBoundsTest(unittest.TestCase):
         self.assertEqual(self.alignment.groups[0].audio_start, 0.0)
 
 
-# Sisters of Scandal (Calibre 602): the KEPUB's content items as (spine index,
+# A non-fiction book: the KEPUB's content items as (spine index,
 # chars) and its substantive ABS chapters as (index, start, end). Twenty-odd
 # chapters of similar length, then a bibliography and image credits worth ~18%
 # of the text that no recording reads.

@@ -411,7 +411,7 @@ def book_positions(docs: dict[int, Document]) -> dict[int, int]:
     get interpolated across, so what matters is whether the narrator reads the
     text, not whether it is long enough to hold a chapter.
 
-    A part divider is short and narrated. Misery's "PART FOUR GODDESS" and its
+    A part divider is short and narrated. One novel's fourth part divider and its
     epigraph is 880 characters and takes about 94 seconds to read, and leaving it
     out of the map placed the whole of Part Four some 160 seconds earlier than it
     is - outside even a doubled search window, so none of it could be found.

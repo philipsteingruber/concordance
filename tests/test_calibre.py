@@ -96,7 +96,7 @@ class ReadSpineGlossaryTest(unittest.TestCase):
     def test_recognises_a_glossary_heading_prefixed_with_the_series_name(self):
         with tempfile.TemporaryDirectory() as tmp:
             epub = Path(tmp) / "book.epub"
-            glossary = ('<html><body><h2><span class="koboSpan">Court of Chains \u2013 Glossary'
+            glossary = ('<html><body><h2><span class="koboSpan">Northern Realm \u2013 Glossary'
                         "</span></h2></body></html>").encode()
             write_epub(epub, [glossary, CHAPTER])
             self.assertEqual(narrated_flags(read_spine(epub)), [False, True])
@@ -126,7 +126,7 @@ class ReadSpineIndexTest(unittest.TestCase):
 
 
 PRAISE = ('<html><body><h1 class="para-fst-fs-pg"><span class="koboSpan">Advance praise for'
-          "<br/>The Tainted Cup</span></h1><p>" + "A triumph. " * 300 + "</p></body></html>").encode()
+          "<br/>The Silver Key</span></h1><p>" + "A triumph. " * 300 + "</p></body></html>").encode()
 HYMN = b"<html><body><h1>A Hymn of Praise</h1><p>" + b"word " * 400 + b"</p></body></html>"
 
 
@@ -150,7 +150,7 @@ class ReadSpinePraiseTest(unittest.TestCase):
         self.assertEqual(self.flags([HYMN, CHAPTER]), [True, True])
 
 
-# SPQR styles its back-matter headings as paragraphs, with no <hN> and no epub:type.
+# One book styles its back-matter headings as paragraphs, with no <hN> and no epub:type.
 HEAD_PARAGRAPH_INDEX = (b'<html><body><p class="head"><a id="page_585"></a>INDEX</p><p>'
                         + b"entry, 12 " * 300 + b"</p></body></html>")
 FURTHER_READING = (b'<html><body><p class="head">FURTHER READING</p><p>'

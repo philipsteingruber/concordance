@@ -28,7 +28,7 @@ MIN_CONTENT_CHARS = 1500
 # afterword): those do appear in recordings, and dropping a narrated item is
 # what made the 2026-09-16 classifier experiment produce false positives.
 # A table of contents is the important one here. It clears MIN_CONTENT_CHARS
-# comfortably (Jade City's is 2,091 chars of chapter titles), so length alone
+# comfortably (one book's is 2,091 chars of chapter titles), so length alone
 # cannot tell it apart from a short chapter, and aligning it against the
 # opening minutes of the audio wrecks that group's score.
 NEVER_NARRATED_TYPES = frozenset({
@@ -37,7 +37,7 @@ NEVER_NARRATED_TYPES = frozenset({
 })
 _EPUB_TYPE = re.compile(rb'epub:type\s*=\s*["\']([^"\']+)["\']')
 _HEADING = re.compile(rb"(?is)<h[1-6][^>]*>(.*?)</h[1-6]>")
-# Some publishers style headings as paragraphs instead: SPQR's back matter is
+# Some publishers style headings as paragraphs instead: one book's back matter is
 # `<p class="head">INDEX</p>` and so on, with no <hN> and no epub:type, so none
 # of it was recognised. Only a paragraph whose class names itself a heading
 # counts, so ordinary first paragraphs never do.
@@ -45,18 +45,18 @@ _HEAD_PARAGRAPH = re.compile(
     rb"""(?is)<p\b[^>]*\bclass\s*=\s*["'][^"']*\bhead(?:er|ing)?\b[^"']*["'][^>]*>(.*?)</p>""")
 # Headings that name a structural page. Kept deliberately small: every entry
 # has to be a title no novel would give a real chapter. Publishers mislabel the
-# machine-readable role (Jade City's copyright page declares
+# machine-readable role (one book's copyright page declares
 # `epub:type="bodymatter chapter"`), so this is the only signal left for it.
 NEVER_NARRATED_HEADINGS = frozenset({
     "copyright", "contents", "table of contents", "cover", "title page",
     "also by this author", "about the publisher",
-    # Non-fiction back matter. Sisters of Scandal declares no role for either,
+    # Non-fiction back matter. One book declares no role for either,
     # and together they are ~18% of its text (see anchor.build_alignment).
     "bibliography", "image credits",
-    # The Rise and Fall of the Third Reich's index has no role either, and it runs
+    # One history book's index has no role either, and it runs
     # on over six more files with no heading at all (see read_spine).
     "index",
-    # SPQR's back matter (2026-11-25): ~120k chars with no role, which pulled the
+    # Another book's back matter (2026-11-25): ~120k chars with no role, which pulled the
     # boundary match off. Acknowledgements are on the list even though a narrator
     # occasionally reads them: they sit among the back matter, and one left
     # narrated keeps everything before it inside the match, because
@@ -94,13 +94,13 @@ def _heading(doc: bytes) -> str | None:
 
 
 # A glossary is only skipped before the story starts. Narrators don't read one
-# placed there (Sun-Kissed Fangs' 1,100-word "Court of Chains – Glossary" is
+# placed there (one series' 1,100-word "<Series> – Glossary" is
 # absent from its recording), but fantasy audiobooks do sometimes read a glossary
 # at the end, so a trailing one stays narrated. Matched as a word anywhere in the
 # heading because series prefix it with their own name.
 _GLOSSARY = re.compile(r"\bglossary\b")
 # A praise page ("Praise for …", "Advance praise for …") is skipped the same way,
-# before the story only. Narrators don't read blurbs, and The Tainted Cup's
+# before the story only. Narrators don't read blurbs, and one book's
 # 2,618-char page declares no role. Left narrated, it was the group's first
 # narrated item, so its copyright page and table of contents became interior
 # items that trim_unnarrated_edges keeps, and ~4,800 chars of front matter were
@@ -275,7 +275,7 @@ def read_spine(epub_path: Path) -> list[SpineItem]:
             # An index split across files names itself only in the first one; the
             # rest have no heading. Without carrying the role over, the last of them
             # stays narrated, trim_unnarrated_edges stops there, and the whole index
-            # enters the match (The Rise and Fall of the Third Reich: seven files,
+            # enters the match (one history book: seven files,
             # ~156k chars, confidence `unusable`). Only an index is carried: a
             # heading-less file after a table of contents is usually chapter 1.
             in_index = False

@@ -19,24 +19,24 @@ class AllowlistFileTest(unittest.TestCase):
         self.assertEqual(read_ids(self.path), set())
 
     def test_writes_the_title_as_a_comment_after_the_id(self):
-        add(self.path, 561, "Misery")
-        self.assertEqual(self.path.read_text(), "561  # Misery\n")
+        add(self.path, 561, "First Book")
+        self.assertEqual(self.path.read_text(), "561  # First Book\n")
 
     def test_reports_an_id_that_is_already_allowed(self):
         add(self.path, 561)
         self.assertFalse(add(self.path, 561))
 
     def test_removes_only_the_named_id(self):
-        self.path.write_text("# my books\n561  # Misery\n581  # The Escape Room\n")
+        self.path.write_text("# my books\n561  # First Book\n581  # Second Book\n")
         remove(self.path, 561)
-        self.assertEqual(self.path.read_text(), "# my books\n581  # The Escape Room\n")
+        self.assertEqual(self.path.read_text(), "# my books\n581  # Second Book\n")
 
     def test_reports_removing_an_id_that_was_not_there(self):
         self.path.write_text("581\n")
         self.assertFalse(remove(self.path, 561))
 
     def test_ignores_comments_and_lines_without_an_id(self):
-        self.path.write_text("# header\n561  # Misery\nnot-a-number\n\n  581\n")
+        self.path.write_text("# header\n561  # First Book\nnot-a-number\n\n  581\n")
         self.assertEqual(read_ids(self.path), {561, 581})
 
     def test_write_policy_allows_ids_from_the_file_and_the_environment(self):

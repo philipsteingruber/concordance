@@ -28,7 +28,7 @@ The ABS side is reset through the API.
 1. Pick a book with both an ebook and an audiobook, no real progress on either
    side, and long chapters, so a wrong position is easy to hear. Check that
    `concordance --book-id <id>` reports a `high` chapter match.
-2. Copy `profiles/lucky-day.sh` to `profiles/<your-book>.sh`. Set `BOOK`,
+2. Copy `profiles/example.sh` to `profiles/<your-book>.sh`. Set `BOOK`,
    `ABS_ITEM` and `DURATION`, and find a real XPointer mid-chapter: read to that
    spot on the device and take it from CWA's
    `/kosync/syncs/progress/<id>`.
