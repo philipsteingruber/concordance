@@ -111,6 +111,46 @@ class BuildChaptersTest(unittest.TestCase):
         new = build_chapters(abs_chapters, [(0, 1)], [])
         self.assertEqual([c["title"] for c in new], ["Slice 1", "Slice 2"])
 
+    def test_never_changes_chapter_start_or_end_times_when_renaming(self):
+        abs_chapters = chapters((0, 100), (100, 200))
+        new = build_chapters(abs_chapters, [], [], renames={0: "Chapter 1", 1: "Chapter 2"})
+        self.assertEqual([(c["title"], c["start"], c["end"]) for c in new],
+                         [("Chapter 1", 0, 100), ("Chapter 2", 100, 200)])
+
+
+class StartTitlesTest(unittest.TestCase):
+    def book(self, starts, docs=None):
+        return types.SimpleNamespace(book_file=Path("/nonexistent.epub"), starts=starts, docs=docs or {})
+
+    def test_prefers_the_toc_label_over_a_bare_heading(self):
+        book = self.book([ChapterStart(8, 0, "Chapter One", "file")])
+        with unittest.mock.patch.object(chapters_mod, "spine_paths", return_value={"chap01.html": 8}), \
+                unittest.mock.patch.object(chapters_mod, "toc_targets",
+                                           return_value=[("chap01.html", None, "Chapter One • The Lighthouse")]):
+            self.assertEqual(chapters_mod.start_titles(book), ["Chapter 1: The Lighthouse"])
+
+    def test_keeps_a_numbered_heading_over_a_toc_that_lists_parts(self):
+        book = self.book([ChapterStart(8, 0, "Chapter 4", "heading")])
+        with unittest.mock.patch.object(chapters_mod, "spine_paths", return_value={"part2.html": 8}), \
+                unittest.mock.patch.object(chapters_mod, "toc_targets",
+                                           return_value=[("part2.html", None, "Part Two")]):
+            self.assertEqual(chapters_mod.start_titles(book), ["Chapter 4"])
+
+    def test_gives_no_title_to_a_file_whose_only_candidate_is_its_opening_sentence(self):
+        doc = parse_document("<html><body><p>It was a dark and stormy night, and the rain fell.</p></body></html>")
+        book = self.book([ChapterStart(3, 0, "Chapter 1", "file")], {3: doc})
+        with unittest.mock.patch.object(chapters_mod, "spine_paths", return_value={}), \
+                unittest.mock.patch.object(chapters_mod, "toc_targets", return_value=[]):
+            self.assertEqual(chapters_mod.start_titles(book), [None])
+
+    def test_takes_a_numbered_file_heading_when_there_is_no_toc_label(self):
+        doc = parse_document("<html><body><p>CHAPTER ONE</p><p>" + "The ferry left at dawn. " * 20
+                             + "</p></body></html>")
+        book = self.book([ChapterStart(3, 0, "Chapter One", "file")], {3: doc})
+        with unittest.mock.patch.object(chapters_mod, "spine_paths", return_value={}), \
+                unittest.mock.patch.object(chapters_mod, "toc_targets", return_value=[]):
+            self.assertEqual(chapters_mod.start_titles(book), ["Chapter 1"])
+
 
 class RenumberCacheTest(unittest.TestCase):
     """The rename that keeps an aligned group valid after its chapters are renumbered."""

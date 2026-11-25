@@ -150,19 +150,30 @@ def main(argv: list[str] | None = None) -> int:
     last_confirmed: float | None = None
     for target in sorted(job["targets"], key=lambda t: t["pos"]):
         t0 = time.time()
-        est, known_before, known_after = estimate(
-            anchors, target["pos"], rate=observed_rate(anchors, fallback_rate), limit=total)
+        # A fixed window asks "does this chapter open right here?" rather than
+        # "where is it?" (renaming ABS chapters). One attempt, no floor and no new
+        # anchor: candidates for several ABS chapters may share an ebook start, and
+        # a wrong candidate that happened to pass must not steer the others.
+        fixed = target.get("window")
+        if fixed:
+            est, known_before, known_after = float(fixed[0]), float(fixed[0]), float(fixed[1])
+        else:
+            est, known_before, known_after = estimate(
+                anchors, target["pos"], rate=observed_rate(anchors, fallback_rate), limit=total)
         half = half_window(est, known_before)
         result = {"id": target["id"], "estimate": round(est, 1), "status": "unconfirmed"}
-        for attempt in range(2):
-            lo = max(0.0, known_before - CLAMP_SLACK, est - half)
-            hi = min(total, (known_after + CLAMP_SLACK) if known_after > known_before else total,
-                     est + half)
+        for attempt in range(1 if fixed else 2):
+            if fixed:
+                lo, hi = float(fixed[0]), min(total, float(fixed[1]))
+            else:
+                lo = max(0.0, known_before - CLAMP_SLACK, est - half)
+                hi = min(total, (known_after + CLAMP_SLACK) if known_after > known_before else total,
+                         est + half)
             if hi - lo < 10:
                 break
             emissions, stride = sliced_emissions(model, decode_audio(manifest, lo, hi), 0, 1)
             words = align_text(emissions, stride, tokenizer, target["text"])
-            ok, start, score, why = judge(words, lo, hi, min_score, floor=last_confirmed)
+            ok, start, score, why = judge(words, lo, hi, min_score, floor=None if fixed else last_confirmed)
             result.update({"window": [round(lo, 1), round(hi, 1)], "score": round(score, 3),
                            "landed": round(start, 1), "attempts": attempt + 1,
                            "extrapolated": target["pos"] > anchors[-1][0]})
@@ -170,8 +181,9 @@ def main(argv: list[str] | None = None) -> int:
             if ok:
                 result.update({"status": "confirmed", "time": round(start, 2)})
                 result.pop("why", None)
-                bisect.insort(anchors, (int(target["pos"]), start))
-                last_confirmed = start
+                if not fixed:
+                    bisect.insort(anchors, (int(target["pos"]), start))
+                    last_confirmed = start
                 break
             half = min(MAX_HALF_WINDOW * 2, half * 2)
         result["seconds"] = round(time.time() - t0)

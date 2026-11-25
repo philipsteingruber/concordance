@@ -1,10 +1,13 @@
-"""Split Audiobookshelf "chapters" that really contain several of the book's chapters.
+"""Split Audiobookshelf "chapters" that really contain several of the book's chapters,
+and rename chapters that are named after the release's files.
 
 Some audiobook releases mark 70-minute slices of the recording as chapters
 ("Chapter 1" … "Chapter 10") while the book has dozens. This finds the real
 chapter starts in the ebook, locates them in the audio, and replaces only the
-ABS chapters that contain two or more of them. Meant for ad hoc use, one book at
-a time:
+ABS chapters that contain two or more of them. When every ABS title is the
+same apart from a number ("001" … "041"), chapters it leaves alone are renamed
+after the ebook chapter whose opening is found at their start, without moving any
+boundary (see `chaptertitles`). Meant for ad hoc use, one book at a time:
 
     concordance-chapters check   <calibre id | title>   # instant: is this book affected?
     concordance-chapters propose <book>                 # find the times; writes nothing
@@ -29,13 +32,17 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Iterator
 
 from .absclient import AbsClient, Chapter
 from .cache import AlignmentCache, manifest_fingerprint
 from .anchor import trim_unnarrated_edges
 from .calibre import SpineItem, load_books, read_spine, spine_file
-from .chapterdetect import ChapterStart, book_positions, detect, load_documents
+from .chapterdetect import (MIN_GAP_CHARS, ChapterStart, _file_start, book_positions, chapter_number,
+                            detect, load_documents, spine_paths, toc_targets)
 from .chapterprobe import estimate, observed_rate
+from .chaptertitles import (NAMED_HEADS, candidates, display_title, fill_gaps, is_generic, match_starts,
+                            probe_window, renamed_titles)
 from .config import Config, ConfigError, ServiceUnavailable, env_number
 from .matching import load_calibre_isbns, match_pairs, normalise_title
 from .orchestrate import docker_options, state_dir
@@ -69,6 +76,9 @@ MIN_MARK_GAP_SECONDS = 5.0
 # placed its chapter 85 s early and took about thirty later chapters down with it.
 CHAPTER_MIN_SCORE = env_number("CONCORDANCE_CHAPTER_MIN_SCORE", -0.5, float)
 OPENING_WORDS = 30
+# Rename rounds: each probes one candidate per unmatched ABS chapter, then
+# re-estimates from everything confirmed so far.
+RENAME_ROUNDS = 3
 RECENT_LISTENING = timedelta(hours=24)
 
 
@@ -139,8 +149,12 @@ def regions(chapters: list[Chapter], times: list[float]) -> list[tuple[int, int]
 
 
 def build_chapters(chapters: list[Chapter], spans: list[tuple[int, int]],
-                   found: list[tuple[float, str]], carried: dict[int, str] | None = None) -> list[dict]:
+                   found: list[tuple[float, str]], carried: dict[int, str] | None = None,
+                   renames: dict[int, str] | None = None) -> list[dict]:
     """The new ABS chapter list: untouched chapters as they are, split regions rebuilt.
+
+    `renames` gives new titles for chapters outside the split regions (by index);
+    their times are never changed.
 
     `found` is (time, title) for confirmed real starts. Inside a region, the stretch
     before its first real start keeps the title of the chapter already in progress
@@ -152,7 +166,7 @@ def build_chapters(chapters: list[Chapter], spans: list[tuple[int, int]],
     while i < len(chapters):
         if i not in span_at:
             c = chapters[i]
-            out.append({"title": c.title, "start": c.start, "end": c.end})
+            out.append({"title": (renames or {}).get(i, c.title), "start": c.start, "end": c.end})
             i += 1
             continue
         first, last = span_at[i]
@@ -384,7 +398,139 @@ def check(cfg: Config, abs_client: AbsClient, query: str) -> int:
     else:
         print(f"{len(split)} ABS chapters would be split. Estimates are proportional; "
               f"`propose` finds the exact times.")
+    ebook_titles = start_titles(book)
+    if is_generic([c.title for c in book.chapters], ebook_titles):
+        named = sum(1 for t in ebook_titles if t)
+        print(f"ABS names are generic: `propose` will try to rename the {len(book.chapters) - len(split)} "
+              f"unsplit chapters from the ebook's {named} titled chapters, without moving any boundary.")
     return 0
+
+
+def _run_probe(cfg: Config, book: Book, anchors: list[tuple[int, float]],
+               targets: list[dict]) -> "Iterator[dict]":
+    """Run `chapterprobe` in the aligner container; yields one result per target."""
+    job = {"manifest": book.manifest, "anchors": sorted(anchors),
+           "total_chars": book.positions[-1],
+           "min_score": max(cfg.min_align_score, CHAPTER_MIN_SCORE),
+           "threads": int(os.environ.get("CONCORDANCE_ALIGNER_THREADS", "0") or 0),
+           "targets": targets}
+    work = state_dir() / "work" / "chapters"
+    work.mkdir(parents=True, exist_ok=True)
+    job_file = work / f"{book.item_id}.json"
+    job_file.write_text(json.dumps(job))
+    cmd = ["docker", *docker_options(cfg, state_dir()), "--entrypoint", "python", cfg.aligner_image,
+           "-m", "concordance.chapterprobe", f"/cache/work/chapters/{job_file.name}"]
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as proc:
+        for line in proc.stdout:
+            if line.startswith("{"):
+                yield json.loads(line)
+        err = proc.stderr.read()
+    if proc.returncode != 0:
+        raise RuntimeError(f"chapter probe failed (exit {proc.returncode}): {err.strip()[-500:]}")
+
+
+def _looks_like_heading(text: str) -> str | None:
+    """A file's opening block as a title only if it reads like one.
+
+    `_file_start` takes any short first block, which for a file with no heading is
+    the opening sentence ("It was a dark and stormy night"). Splitting tolerates
+    that, since the mark's time is what matters there; a rename is all title.
+    """
+    text = " ".join(text.split())
+    if not text:
+        return None
+    if chapter_number(text) is not None or text.isupper():
+        return text
+    if text.split()[0].lower().strip(".:") in NAMED_HEADS:
+        return text
+    return None
+
+
+def start_titles(book: Book) -> list[str | None]:
+    """Each start's own title in display style, or None when the ebook gives it none.
+
+    For a start at the top of a file, the TOC label wins over the opening heading:
+    some books open each chapter file with "CHAPTER ONE", "·" and a subtitle as
+    three separate blocks, so the heading alone is "Chapter One" while the TOC says
+    "Chapter One • The Subtitle". Starts found from numbered headings keep
+    the heading, since a TOC may only list the parts those chapters sit in. A file
+    with neither gets None, never the positional "Chapter N" `detect` invents:
+    a position is exactly the kind of number renaming exists to avoid.
+    """
+    labels: dict[int, str] = {}
+    try:
+        paths = spine_paths(book.book_file)
+        for path, fragment, label in toc_targets(book.book_file):
+            index = paths.get(path)
+            if fragment is None and index is not None and label and index not in labels:
+                labels[index] = label
+    except Exception:  # a malformed TOC only costs the better titles
+        labels = {}
+    out: list[str | None] = []
+    for s in book.starts:
+        title: str | None
+        if s.source == "heading":
+            title = s.title
+        elif s.offset < MIN_GAP_CHARS and s.spine in labels:
+            title = labels[s.spine]
+        elif s.source == "file":
+            title = _looks_like_heading(_file_start(s.spine, book.docs[s.spine]).title)
+        else:
+            title = s.title
+        out.append(display_title(title) if title else None)
+    return out
+
+
+def rename(cfg: Config, book: Book, spans: list[tuple[int, int]], known: dict[int, float],
+           anchors: list[tuple[int, float]], rate: float, titles: list[str | None]) -> dict[int, str]:
+    """New titles for ABS chapters outside the split regions, by locating ebook
+    openings at their starts. Confirmed times are remembered for later runs."""
+    in_span = {i for first, last in spans for i in range(first, last + 1)}
+    eligible = [i for i in range(len(book.chapters)) if i not in in_span]
+    titled = {k for k, t in enumerate(titles) if t}
+    known = {k: t for k, t in known.items() if k in titled}
+    matched = match_starts(book.chapters, known, set(eligible))
+    print(f"Renaming: {len(matched)} of {len(eligible)} ABS chapters matched from known times.", flush=True)
+    tried: set[tuple[int, int]] = set()
+    attempts: dict[tuple[int, int], tuple[float, float]] = {}
+    anchors = sorted(set(anchors))
+    for round_no in range(1, RENAME_ROUNDS + 1):
+        estimates = [known[k] if k in known
+                     else estimate(anchors, book.pos(s), rate=rate, limit=book.duration)[0]
+                     for k, s in enumerate(book.starts)]
+        pairs = candidates(book.chapters, eligible, estimates, titled, matched, tried)
+        if not pairs:
+            break
+        tried.update(pairs)
+        print(f"  round {round_no}: probing {len(pairs)} chapter openings", flush=True)
+        targets = []
+        for i, k in pairs:
+            lo, hi = probe_window(book.chapters[i], book.duration)
+            targets.append({"id": f"{i}:{k}", "pos": book.pos(book.starts[k]), "window": [lo, hi],
+                            "text": opening_text(book, book.starts[k])})
+        confirmed: dict[int, float] = {}
+        for r in _run_probe(cfg, book, anchors, targets):
+            i, k = (int(x) for x in str(r["id"]).split(":"))
+            ok = r.get("status") == "confirmed" and r.get("time") is not None
+            if r.get("landed") is not None:
+                attempts[(i, k)] = (float(r.get("score", -99.0)), float(r["landed"]))
+            if ok:
+                confirmed[k] = r["time"]
+            print(f"    {book.chapters[i].title[:24]:24} {'=' if ok else '?'} {titles[k][:40]:40} "
+                  f"score {r.get('score', 0):6.2f}  ({r.get('seconds', 0)} s)", flush=True)
+        if not confirmed:
+            continue
+        known.update(confirmed)
+        anchors = sorted(set(anchors) | {(book.pos(book.starts[k]), t) for k, t in confirmed.items()})
+        matched = match_starts(book.chapters, known, set(eligible))
+        # Only times that ended up matched are trusted enough to keep as anchors
+        # for later runs; a confirmation that matched nothing stays out.
+        remember_times(book, {k: known[k] for k in matched.values() if k in confirmed})
+    named = {i: titles[k] for i, k in matched.items() if titles[k]}
+    filled = fill_gaps(book.chapters, set(eligible), matched, titles, attempts)
+    for i, title in sorted(filled.items()):
+        print(f"  {book.chapters[i].title[:24]:24} named from its neighbours: {title}", flush=True)
+    return renamed_titles(book.chapters, {**named, **filled})
 
 
 def propose(cfg: Config, abs_client: AbsClient, query: str) -> int:
@@ -411,69 +557,77 @@ def propose(cfg: Config, abs_client: AbsClient, query: str) -> int:
              else estimate(anchors, book.pos(s), rate=rate, limit=book.duration)[0]
              for k, s in enumerate(book.starts)]
     spans = regions(book.chapters, times)
-    if not spans:
-        print(f"{book.title}: no ABS chapter holds several real chapters; nothing to propose.")
+    titles = start_titles(book)
+    generic = is_generic([c.title for c in book.chapters], titles)
+    if not spans and not generic:
+        print(f"{book.title}: no ABS chapter holds several real chapters and the names aren't generic; "
+              f"nothing to propose.")
         return 0
-    lo = {first: book.chapters[first].start for first, _ in spans}
-    in_scope = [k for k, t in enumerate(times)
-                if any(book.chapters[f].start - 300 <= t < book.chapters[l].end + 300 for f, l in spans)]
-    probe = [k for k in in_scope if k not in cached]
-    print(f"{book.title}: {len(in_scope)} chapter starts in {len(spans)} region(s); "
-          f"{len(in_scope) - len(probe)} already known (alignment cache or an earlier propose), "
-          f"{len(probe)} to locate.", flush=True)
 
-    results: dict[int, dict] = {k: {"status": "cached", "time": cached[k]} for k in in_scope if k in cached}
-    if probe:
-        job = {"manifest": book.manifest, "anchors": sorted(anchors),
-               "total_chars": book.positions[-1],
-               "min_score": max(cfg.min_align_score, CHAPTER_MIN_SCORE),
-               "threads": int(os.environ.get("CONCORDANCE_ALIGNER_THREADS", "0") or 0),
-               "targets": [{"id": k, "pos": book.pos(book.starts[k]), "text": opening_text(book, book.starts[k])}
-                           for k in probe]}
-        work = state_dir() / "work" / "chapters"
-        work.mkdir(parents=True, exist_ok=True)
-        job_file = work / f"{book.item_id}.json"
-        job_file.write_text(json.dumps(job))
-        cmd = ["docker", *docker_options(cfg, state_dir()), "--entrypoint", "python", cfg.aligner_image,
-               "-m", "concordance.chapterprobe", f"/cache/work/chapters/{job_file.name}"]
-        started = time.time()
-        with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as proc:
-            for line in proc.stdout:
-                if not line.startswith("{"):
-                    continue
-                r = json.loads(line)
+    results: dict[int, dict] = {}
+    if spans:
+        in_scope = [k for k, t in enumerate(times)
+                    if any(book.chapters[f].start - 300 <= t < book.chapters[l].end + 300 for f, l in spans)]
+        probe = [k for k in in_scope if k not in cached]
+        print(f"{book.title}: {len(in_scope)} chapter starts in {len(spans)} region(s); "
+              f"{len(in_scope) - len(probe)} already known (alignment cache or an earlier propose), "
+              f"{len(probe)} to locate.", flush=True)
+        results = {k: {"status": "cached", "time": cached[k]} for k in in_scope if k in cached}
+        if probe:
+            started = time.time()
+            targets = [{"id": k, "pos": book.pos(book.starts[k]), "text": opening_text(book, book.starts[k])}
+                       for k in probe]
+            for r in _run_probe(cfg, book, anchors, targets):
                 results[r["id"]] = r
                 s = book.starts[r["id"]]
                 where = _fmt(r["time"]) if r.get("time") is not None else "-"
                 print(f"  {len(results):3}/{len(in_scope)}  {s.title[:36]:36} {r['status']:11} {where}  "
                       f"score {r.get('score', 0):6.2f}  ({r.get('seconds', 0)} s)", flush=True)
-            err = proc.stderr.read()
-        if proc.returncode != 0:
-            print(f"error: chapter probe failed (exit {proc.returncode}): {err.strip()[-500:]}", file=sys.stderr)
-            return 1
-        print(f"Located in {_fmt(time.time() - started)}.")
-        remember_times(book, {k: r["time"] for k, r in results.items()
-                              if r.get("status") == "confirmed" and r.get("time") is not None})
+            print(f"Located in {_fmt(time.time() - started)}.")
+            remember_times(book, {k: r["time"] for k, r in results.items()
+                                  if r.get("status") == "confirmed" and r.get("time") is not None})
+    else:
+        print(f"{book.title}: nothing to split; ABS chapter names are generic, looking for names.", flush=True)
 
-    found = [(r["time"], book.starts[k].title) for k, r in results.items() if r.get("time") is not None]
+    def title_of(k: int) -> str:
+        return titles[k] or book.starts[k].title
+
+    found = [(r["time"], title_of(k)) for k, r in results.items() if r.get("time") is not None]
     carried = {}
     for first, _ in spans:
-        before = [book.starts[k].title for k, t in enumerate(times) if t < lo[first]]
+        before = [title_of(k) for k, t in enumerate(times) if t < book.chapters[first].start]
         carried[first] = f"{before[-1]} (continued)" if before else None
-    after = build_chapters(book.chapters, spans, found, carried)
-    unconfirmed = [book.starts[k].title for k, r in results.items() if r["status"] == "unconfirmed"]
+    renames: dict[int, str] = {}
+    if generic:
+        known = {**cached, **{k: r["time"] for k, r in results.items()
+                              if r.get("status") == "confirmed" and r.get("time") is not None}}
+        renames = rename(cfg, book, spans, known, anchors, rate, titles)
+    after = build_chapters(book.chapters, spans, found, carried, renames)
+    before_list = [dataclasses.asdict(c) for c in book.chapters]
+    if [(c["title"], c["start"], c["end"]) for c in after] == \
+            [(c.title, c.start, c.end) for c in book.chapters]:
+        print(f"{book.title}: no change found; nothing to propose.")
+        return 0
+    unconfirmed = [title_of(k) for k, r in results.items() if r["status"] == "unconfirmed"]
     proposal = {"created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "calibre_id": book.calibre_id, "title": book.title, "item_id": book.item_id,
-                "before": [dataclasses.asdict(c) for c in book.chapters], "after": after,
-                "unconfirmed": unconfirmed}
+                "before": before_list, "after": after, "unconfirmed": unconfirmed}
     path = chapter_dir() / f"{book.item_id}-proposal.json"
     path.write_text(json.dumps(proposal, indent=1))
 
     print(f"\nProposed: {len(book.chapters)} -> {len(after)} chapters")
+    old_title = {(round(c.start, 3), round(c.end, 3)): c.title for c in book.chapters}
     for c in after:
-        print(f"  {_fmt(c['start'])}  {c['title']}")
+        old = old_title.get((round(c["start"], 3), round(c["end"], 3)))
+        note = f"   (was {old})" if old is not None and old != c["title"] else ""
+        print(f"  {_fmt(c['start'])}  {c['title']}{note}")
     if unconfirmed:
         print(f"Not found, left out ({len(unconfirmed)}): {', '.join(unconfirmed[:10])}")
+    if generic:
+        kept = [c.title for i, c in enumerate(book.chapters)
+                if i not in renames and not any(f <= i <= l for f, l in spans)]
+        if kept:
+            print(f"Kept their old names ({len(kept)}): {', '.join(kept[:10])}")
     print(f"Saved to {path}. Review, then `concordance-chapters apply {book.calibre_id}`.")
     return 0
 
@@ -578,7 +732,8 @@ def restore(cfg: Config, abs_client: AbsClient, query: str, force: bool) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="concordance-chapters",
-                                 description="Split ABS chapters that contain several of the book's chapters.")
+                                 description="Split ABS chapters that contain several of the book's chapters, "
+                                             "and rename chapters named after the release's files.")
     ap.add_argument("action", choices=("check", "propose", "apply", "restore"))
     ap.add_argument("book", help="Calibre id or part of the title")
     ap.add_argument("--force", action="store_true", help="apply/restore even if listened to in the last 24 h")
