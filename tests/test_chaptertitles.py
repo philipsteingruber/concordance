@@ -3,7 +3,8 @@ import unittest
 from concordance.absclient import Chapter
 from concordance.chaptertitles import (CREDITS_MAX_SECONDS, END_CREDITS, MATCH_LEAD_IN_SECONDS,
                                        NEAR_MISS_SCORE, OPENING_CREDITS, candidates, display_title,
-                                       fill_gaps, is_generic, match_starts, renamed_titles)
+                                       fill_gaps, is_generic, match_starts, merge_repeats,
+                                       renamed_titles)
 
 
 def named(*spans):
@@ -26,6 +27,12 @@ class IsGenericTest(unittest.TestCase):
 
     def test_leaves_plain_chapter_numbers_alone_when_the_ebook_has_only_numbers(self):
         self.assertFalse(is_generic(["Chapter 1", "Chapter 2"], ["Chapter 1", "Chapter 2"]))
+
+    def test_renames_plain_chapter_numbers_when_abs_has_more_chapters_than_the_ebook(self):
+        self.assertTrue(is_generic(["Chapter 1", "Chapter 2", "Chapter 3"], ["Chapter 1", "Chapter 2"]))
+
+    def test_leaves_plain_chapter_numbers_alone_when_the_ebook_has_no_titles(self):
+        self.assertFalse(is_generic(["Chapter 1", "Chapter 2", "Chapter 3"], [None, None]))
 
     def test_renames_plain_chapter_numbers_when_the_ebook_has_subtitles(self):
         self.assertTrue(is_generic(["Chapter 1", "Chapter 2"],
@@ -154,3 +161,18 @@ class FillGapsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MergeRepeatsTest(unittest.TestCase):
+    def test_joins_adjacent_chapters_with_the_same_title_into_one_span(self):
+        merged = merge_repeats([{"title": "Opening Credits", "start": 0, "end": 17},
+                                {"title": "Opening Credits", "start": 17, "end": 26},
+                                {"title": "Chapter 1", "start": 26, "end": 900}])
+        self.assertEqual(merged, [{"title": "Opening Credits", "start": 0, "end": 26},
+                                  {"title": "Chapter 1", "start": 26, "end": 900}])
+
+    def test_keeps_chapters_with_the_same_title_apart_when_something_sits_between_them(self):
+        chapters = [{"title": "Interlude", "start": 0, "end": 60},
+                    {"title": "Chapter 1", "start": 60, "end": 900},
+                    {"title": "Interlude", "start": 900, "end": 960}]
+        self.assertEqual(merge_repeats(chapters), chapters)

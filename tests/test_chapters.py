@@ -10,7 +10,7 @@ from concordance.chapterdetect import (ChapterStart, _label_parts, _numbered_run
                                        chapter_number, heading_blocks)
 from concordance.chapterprobe import EDGE_SECONDS, estimate, half_window, judge, observed_rate
 from concordance.calibre import SpineItem
-from concordance.chapters import build_chapters, narrated_starts, regions
+from concordance.chapters import build_chapters, narrated_starts, regions, was_note
 from concordance.xpointer import parse_document
 
 
@@ -513,3 +513,19 @@ class TocTargetsTest(unittest.TestCase):
                             '<body><nav epub:type="toc"><ol><li><a href="OEBPS/chap01.html">Chapter One • '
                             'The Lighthouse</a></li></ol></nav></body></html>')
             self.assertEqual(toc_targets(path), [("OEBPS/chap01.html", None, "Chapter One • The Lighthouse")])
+
+
+class WasNoteTest(unittest.TestCase):
+    old = [Chapter(1, "Chapter 1", 0.0, 17.0), Chapter(2, "Chapter 2", 17.0, 26.0),
+           Chapter(3, "Chapter 3", 26.0, 54.0), Chapter(4, "Chapter 4", 54.0, 900.0)]
+
+    def test_names_the_first_and_last_old_chapters_a_merged_chapter_covers(self):
+        note = was_note(self.old, {"title": "Opening Credits", "start": 0.0, "end": 54.0})
+        self.assertEqual(note, "   (was Chapter 1–3)")
+
+    def test_names_the_old_title_of_a_renamed_chapter(self):
+        note = was_note(self.old, {"title": "Chapter 1", "start": 54.0, "end": 900.0})
+        self.assertEqual(note, "   (was Chapter 4)")
+
+    def test_says_nothing_about_a_chapter_cut_out_of_an_old_one(self):
+        self.assertEqual(was_note(self.old, {"title": "Two", "start": 60.0, "end": 900.0}), "")

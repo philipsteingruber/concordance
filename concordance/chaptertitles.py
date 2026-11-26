@@ -56,13 +56,20 @@ def has_subtitles(ebook_titles: list[str | None]) -> bool:
     return bool(titled) and len(rich) * 2 > len(titled)
 
 
+def count_differs(titles: list[str], ebook_titles: list[str | None]) -> bool:
+    """True when ABS and the ebook disagree on how many titled chapters there are."""
+    titled = [t for t in ebook_titles if t]
+    return bool(titled) and len(titled) != len(titles)
+
+
 def is_generic(titles: list[str], ebook_titles: list[str | None] | None = None) -> bool:
     """True when every ABS title is the same text apart from numbers and timestamps.
 
     "Chapter 1" … "Chapter N" counts only when the ebook has better names to
-    offer (`has_subtitles`): a plain list against an ebook's "Chapter 1: The
-    Subtitle" is worth renaming, a plain list against an ebook's own plain
-    numbers is not. Empty titles count as generic.
+    offer (`has_subtitles`), or when the two lists can't be numbered the same
+    (`count_differs`): credits split into their own files push every ABS number
+    past the book's. A plain list against an ebook's own plain numbers, chapter
+    for chapter, is left alone. Empty titles count as generic.
     """
     if len(titles) < 2:
         return False
@@ -73,7 +80,8 @@ def is_generic(titles: list[str], ebook_titles: list[str | None] | None = None) 
     if shape == "":
         return True
     if shape.lower() == "chapter #":
-        return ebook_titles is not None and has_subtitles(ebook_titles)
+        return ebook_titles is not None and (has_subtitles(ebook_titles)
+                                             or count_differs(titles, ebook_titles))
     return "#" in shape
 
 
@@ -212,4 +220,21 @@ def fill_gaps(chapters: list[Chapter], eligible: set[int], matched: dict[int, in
                     out[i] = titles[k]
         elif kb == ka + 1 and titles[ka]:
             out[i] = f"{titles[ka]} (continued)"
+    return out
+
+
+def merge_repeats(chapters: list[dict]) -> list[dict]:
+    """Join runs of adjacent chapters that ended up with the same title.
+
+    Renaming can give several files one name, typically opening credits split
+    into two or three short files. Showing "Opening Credits" three times in a row
+    says nothing the first one doesn't, so the run becomes one chapter from the
+    first start to the last end. Only boundaries are removed, never moved.
+    """
+    out: list[dict] = []
+    for c in chapters:
+        if out and out[-1]["title"] == c["title"]:
+            out[-1] = {**out[-1], "end": c["end"]}
+        else:
+            out.append(dict(c))
     return out

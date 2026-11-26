@@ -42,7 +42,7 @@ from .chapterdetect import (MIN_GAP_CHARS, ChapterStart, _file_start, book_posit
                             detect, load_documents, spine_paths, toc_targets)
 from .chapterprobe import estimate, observed_rate
 from .chaptertitles import (NAMED_HEADS, candidates, display_title, fill_gaps, is_generic, match_starts,
-                            probe_window, renamed_titles)
+                            merge_repeats, probe_window, renamed_titles)
 from .config import Config, ConfigError, ServiceUnavailable, env_number
 from .matching import load_calibre_isbns, match_pairs, normalise_title
 from .orchestrate import docker_options, state_dir
@@ -146,6 +146,24 @@ def regions(chapters: list[Chapter], times: list[float]) -> list[tuple[int, int]
         else:
             out.append((i, i))
     return out
+
+
+def was_note(old: list[Chapter], new: dict) -> str:
+    """"   (was <old title>)" for a renamed chapter, "" when nothing changed or it was split.
+
+    A chapter that covers several old ones exactly, as `merge_repeats` makes,
+    names the first and last of them: "(was Chapter 1–3)".
+    """
+    start, end = round(new["start"], 3), round(new["end"], 3)
+    covered = [c for c in old if round(c.start, 3) >= start and round(c.end, 3) <= end]
+    if not covered or round(covered[0].start, 3) != start or round(covered[-1].end, 3) != end:
+        return ""
+    if len(covered) == 1:
+        return f"   (was {covered[0].title})" if covered[0].title != new["title"] else ""
+    first, last = covered[0].title, covered[-1].title
+    head, _, tail = last.rpartition(" ")
+    shorter = tail if head and first.startswith(head + " ") else last  # "Chapter 1–3", not "Chapter 1–Chapter 3"
+    return f"   (was {first}–{shorter})"
 
 
 def build_chapters(chapters: list[Chapter], spans: list[tuple[int, int]],
@@ -603,6 +621,8 @@ def propose(cfg: Config, abs_client: AbsClient, query: str) -> int:
                               if r.get("status") == "confirmed" and r.get("time") is not None}}
         renames = rename(cfg, book, spans, known, anchors, rate, titles)
     after = build_chapters(book.chapters, spans, found, carried, renames)
+    if generic:
+        after = merge_repeats(after)
     before_list = [dataclasses.asdict(c) for c in book.chapters]
     if [(c["title"], c["start"], c["end"]) for c in after] == \
             [(c.title, c.start, c.end) for c in book.chapters]:
@@ -616,11 +636,8 @@ def propose(cfg: Config, abs_client: AbsClient, query: str) -> int:
     path.write_text(json.dumps(proposal, indent=1))
 
     print(f"\nProposed: {len(book.chapters)} -> {len(after)} chapters")
-    old_title = {(round(c.start, 3), round(c.end, 3)): c.title for c in book.chapters}
     for c in after:
-        old = old_title.get((round(c["start"], 3), round(c["end"], 3)))
-        note = f"   (was {old})" if old is not None and old != c["title"] else ""
-        print(f"  {_fmt(c['start'])}  {c['title']}{note}")
+        print(f"  {_fmt(c['start'])}  {c['title']}{was_note(book.chapters, c)}")
     if unconfirmed:
         print(f"Not found, left out ({len(unconfirmed)}): {', '.join(unconfirmed[:10])}")
     if generic:
